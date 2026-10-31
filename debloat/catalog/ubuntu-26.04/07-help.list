@@ -1,0 +1,5 @@
+# Remove the Ubuntu/GNOME help viewer and installed desktop help documents.
+gnome-user-docs
+ubuntu-docs
+yelp
+yelp-xsl

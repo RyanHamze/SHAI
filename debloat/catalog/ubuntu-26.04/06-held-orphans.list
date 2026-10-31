@@ -1,0 +1,20 @@
+# Orphans deliberately retained for kernel rollback, accessibility, cryptography,
+# password hardening, TPM/encryption, certificate, or SHAI system-integration needs.
+libargon2-1
+liblouisutdml-bin
+liblouisutdml-data
+liblouisutdml9t64
+libpam-pwquality
+libsodium23
+libtss2-tcti-libtpms0t64
+libtss2-tcti-spi-helper0t64
+libtss2-tctildr0t64
+linux-headers-7.0.0-30
+linux-headers-7.0.0-30-generic
+linux-image-unsigned-7.0.0-30-generic
+linux-main-modules-zfs-7.0.0-30-generic
+linux-modules-7.0.0-30-generic
+linux-tools-7.0.0-30
+linux-tools-7.0.0-30-generic
+python3-systemd
+ssl-cert

@@ -1,0 +1,19 @@
+# Approved for a home appliance without AD, LDAP, Kerberos, IPA, or GNOME remote desktop.
+# OpenSSH is deliberately retained.
+gnome-remote-desktop
+libipa-hbac0t64
+libnss-sss
+libpam-sss
+libsss-certmap0
+libsss-idmap0
+libsss-nss-idmap0
+python3-sss
+sssd
+sssd-ad
+sssd-ad-common
+sssd-common
+sssd-ipa
+sssd-krb5
+sssd-krb5-common
+sssd-ldap
+sssd-proxy

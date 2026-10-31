@@ -1,0 +1,11 @@
+# One extended regular expression per line. Any simulated removal matching one stops the wave.
+^linux-
+^(grub|grub2|shim|efibootmgr)
+^(apt|apt-utils|dpkg|sudo|polkitd|policykit-1)$
+^(ubuntu-desktop|ubuntu-desktop-minimal|ubuntu-minimal|ubuntu-standard)$
+^(gdm3|gnome-shell|gnome-session|gnome-control-center|nautilus)$
+^(network-manager|netplan.io|systemd-resolved|wpa-supplicant)$
+^(openssh-client|openssh-server|openssh-sftp-server)$
+^(pipewire|pipewire-audio|pipewire-pulse|wireplumber|alsa-base)$
+^(snapd|firefox|avahi-daemon|packagekit|cloud-init|cloud-init-base)$
+^(brltty|orca)$

@@ -1,0 +1,9 @@
+# Approved safe removal of Ubuntu metrics and crash-reporting components.
+# Removing whoopsie-preferences would also remove GDM, GNOME Shell, Settings, and the
+# Ubuntu session, so that settings integration package is retained. The whoopsie upload
+# service is retained but masked. PackageKit is deliberately retained.
+apport
+apport-core-dump-handler
+apport-gtk
+apport-symptoms
+ubuntu-insights

@@ -1,0 +1,8 @@
+{
+  "policies": {
+    "Proxy": {
+      "Mode": "system",
+      "Locked": true
+    }
+  }
+}

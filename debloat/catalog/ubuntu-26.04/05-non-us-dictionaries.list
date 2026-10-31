@@ -1,0 +1,9 @@
+# Keep generic English and en-US dictionaries/locales; remove other regional dictionaries.
+hunspell-en-au
+hunspell-en-ca
+hunspell-en-gb
+hunspell-en-za
+hunspell-fr-classical
+hyphen-en-ca
+hyphen-en-gb
+mythes-en-au

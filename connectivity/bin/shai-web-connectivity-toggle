@@ -1,0 +1,53 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+readonly PROXY_SCHEMA="org.gnome.system.proxy"
+readonly LOOPBACK_HOST="127.0.0.1"
+readonly CLOSED_PORT=1
+
+notify() {
+    local summary="$1"
+    local body="$2"
+
+    if command -v notify-send >/dev/null 2>&1; then
+        notify-send --app-name="SHAI" "$summary" "$body" >/dev/null 2>&1 || true
+    fi
+}
+
+set_offline() {
+    gsettings set "$PROXY_SCHEMA" ignore-hosts "['localhost', '127.0.0.1', '::1', '*.local', '10.*', '192.168.*', '172.16.*', '172.17.*', '172.18.*', '172.19.*', '172.20.*', '172.21.*', '172.22.*', '172.23.*', '172.24.*', '172.25.*', '172.26.*', '172.27.*', '172.28.*', '172.29.*', '172.30.*', '172.31.*']"
+    gsettings set "$PROXY_SCHEMA" use-same-proxy true
+    gsettings set "$PROXY_SCHEMA.http" host "$LOOPBACK_HOST"
+    gsettings set "$PROXY_SCHEMA.http" port "$CLOSED_PORT"
+    gsettings set "$PROXY_SCHEMA.https" host "$LOOPBACK_HOST"
+    gsettings set "$PROXY_SCHEMA.https" port "$CLOSED_PORT"
+    gsettings set "$PROXY_SCHEMA.ftp" host "$LOOPBACK_HOST"
+    gsettings set "$PROXY_SCHEMA.ftp" port "$CLOSED_PORT"
+    gsettings set "$PROXY_SCHEMA.socks" host "$LOOPBACK_HOST"
+    gsettings set "$PROXY_SCHEMA.socks" port "$CLOSED_PORT"
+    gsettings set "$PROXY_SCHEMA" mode manual
+    notify "SHAI Web Offline" "Internet access is blocked for applications that follow the system proxy. Local Home Assistant and private LAN addresses remain available."
+    printf '%s\n' "offline"
+}
+
+set_online() {
+    gsettings set "$PROXY_SCHEMA" mode none
+    notify "SHAI Web Online" "The system proxy block is disabled. Applications may access the internet according to firewall and network policy."
+    printf '%s\n' "online"
+}
+
+case "${1:-toggle}" in
+    offline) set_offline ;;
+    online) set_online ;;
+    toggle)
+        case "$(gsettings get "$PROXY_SCHEMA" mode)" in
+            "'manual'") set_online ;;
+            *) set_offline ;;
+        esac
+        ;;
+    *)
+        printf 'usage: %s [offline|online|toggle]\n' "${0##*/}" >&2
+        exit 2
+        ;;
+esac
