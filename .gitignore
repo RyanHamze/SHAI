@@ -1,0 +1,7 @@
+/dist/
+/installer/build/
+/signed-release/
+*.asc
+*.gpg
+*SECRET*
+*private*
