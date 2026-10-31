@@ -1,5 +1,8 @@
 #!/usr/bin/env bash
 
+# Markdown backticks in literal printf format strings are intentional.
+# shellcheck disable=SC2016,SC1091
+
 # Standardized, read-only checkpoint collected before and after each debloat wave.
 
 set -u

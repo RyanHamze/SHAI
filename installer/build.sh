@@ -1,10 +1,12 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
-readonly ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+readonly ROOT
 readonly VERSION="0.1.2"
 readonly PACKAGE="shai-installer_${VERSION}_amd64"
-readonly BUILD_ROOT="$(mktemp -d "/tmp/shai-installer-build-${VERSION}.XXXXXX")"
+BUILD_ROOT="$(mktemp -d "/tmp/shai-installer-build-${VERSION}.XXXXXX")"
+readonly BUILD_ROOT
 readonly STAGE="$BUILD_ROOT/$PACKAGE"
 readonly DIST="$ROOT/dist"
 readonly SOURCE_DATE_EPOCH="${SOURCE_DATE_EPOCH:-$(git -C "$ROOT" log -1 --format=%ct 2>/dev/null || printf '0')}"

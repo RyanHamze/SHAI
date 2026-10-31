@@ -72,8 +72,10 @@ if ! id "$TARGET_USER" >/dev/null 2>&1; then
     exit 1
 fi
 
-readonly TARGET_HOME="$(getent passwd "$TARGET_USER" | cut -d: -f6)"
-readonly STAMP="$(date +%Y%m%d-%H%M%S)"
+TARGET_HOME="$(getent passwd "$TARGET_USER" | cut -d: -f6)"
+readonly TARGET_HOME
+STAMP="$(date +%Y%m%d-%H%M%S)"
+readonly STAMP
 readonly RUN_DIR="$STATE_DIR/runs/$STAMP"
 readonly RUN_LOG="$LOG_DIR/shai-installer-$STAMP.log"
 
@@ -271,7 +273,8 @@ prepare_wave() {
 }
 
 simulate_wave() {
-    local wave="$1" list_file="$2" simulation="$RUN_DIR/simulate-$wave.txt"
+    local wave="$1" list_file="$2" simulation
+    simulation="$RUN_DIR/simulate-$wave.txt"
     local -a targets=()
     prepare_wave "$wave" "$list_file"
     mapfile -t targets < <(sed '/^$/d' "$RUN_DIR/targets-$wave.txt")
