@@ -3,7 +3,7 @@ set -Eeuo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 readonly ROOT
-readonly PACKAGE="${1:-$ROOT/dist/shai-installer_0.3.3_amd64.deb}"
+readonly PACKAGE="${1:-$ROOT/dist/shai-installer_0.3.4_amd64.deb}"
 TEST_DIR="$(mktemp -d /tmp/shai-wave-a-package-test.XXXXXX)"
 readonly TEST_DIR
 USER_NAME="$(id -un)"
@@ -21,7 +21,32 @@ python3 -m py_compile \
     "$ROOT/installer/src/shai-setup" \
     "$ROOT/installer/src/shai-wave-a-shell" \
     "$ROOT/installer/src/shai-appearance" \
-    "$ROOT/installer/src/shai-plan-validator"
+    "$ROOT/installer/src/shai-plan-validator" \
+    "$ROOT/installer/src/shai-system-summary"
+
+python3 - "$ROOT/installer/src/shai-installer" <<'PY'
+import pathlib
+import sys
+
+lines = pathlib.Path(sys.argv[1]).read_text(encoding="utf-8").splitlines()
+index = 0
+count = 0
+while index < len(lines):
+    if "<<'PY'" not in lines[index]:
+        index += 1
+        continue
+    start = index + 1
+    end = start
+    while end < len(lines) and lines[end] != "PY":
+        end += 1
+    if end == len(lines):
+        raise SystemExit(f"Unterminated Python heredoc at line {index + 1}")
+    compile("\n".join(lines[start:end]) + "\n", f"embedded-python-{index + 1}", "exec")
+    count += 1
+    index = end + 1
+if count == 0:
+    raise SystemExit("No embedded Python blocks were validated")
+PY
 
 umask 077
 perl -MJSON::PP -e '
@@ -81,7 +106,8 @@ python3 -m py_compile \
     "$TEST_DIR/root/usr/bin/shai-setup" \
     "$TEST_DIR/root/usr/bin/shai-wave-a-shell" \
     "$TEST_DIR/root/usr/bin/shai-appearance" \
-    "$TEST_DIR/root/usr/lib/shai-installer/shai-plan-validator"
+    "$TEST_DIR/root/usr/lib/shai-installer/shai-plan-validator" \
+    "$TEST_DIR/root/usr/lib/shai-installer/shai-system-summary"
 
 for path in \
     usr/bin/shai-installer \
@@ -92,6 +118,10 @@ for path in \
     usr/bin/shai-theme-default \
     usr/bin/shai-appearance \
     usr/lib/shai-installer/shai-plan-validator \
+    usr/lib/shai-installer/shai-system-summary \
+    usr/lib/shai-installer/assets/30-shai-privacy \
+    usr/lib/shai-installer/assets/gnome-wellbeing-panel.desktop \
+    usr/lib/shai-installer/assets/shai.palette \
     usr/share/applications/shai-setup.desktop \
     usr/share/doc/shai-installer/SETUP_README.md \
     usr/share/shai/branding/shai-lockup-dark.svg \
@@ -152,5 +182,18 @@ for deferred in shai-home.desktop shai-shapp.desktop shai-health.desktop shai-ai
     }
 done
 
+grep -Fq "whitelisted-providers=['']" \
+    "$TEST_DIR/root/usr/lib/shai-installer/assets/30-shai-privacy"
+grep -Fq 'Foreground=#33EE33' \
+    "$TEST_DIR/root/usr/lib/shai-installer/assets/shai.palette"
+grep -Fq 'Background=#000000' \
+    "$TEST_DIR/root/usr/lib/shai-installer/assets/shai.palette"
+grep -Fq 'timedatectl set-ntp false' \
+    "$TEST_DIR/root/usr/bin/shai-installer"
+grep -Fq 'flatpak permission-remove location location' \
+    "$TEST_DIR/root/usr/bin/shai-installer"
+grep -Fq 'Automatic date and time' \
+    "$TEST_DIR/root/usr/lib/shai-installer/shai-system-summary"
+
 (cd "$(dirname "$PACKAGE")" && sha256sum -c "$(basename "$PACKAGE").sha256")
-printf 'SHAI Setup Wave A package tests passed. Evidence: %s\n' "$TEST_DIR"
+printf 'SHAI Setup package tests passed. Evidence: %s\n' "$TEST_DIR"

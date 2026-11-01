@@ -1,0 +1,12 @@
+[org/gnome/online-accounts]
+whitelisted-providers=['']
+
+[org/gnome/desktop/screen-time-limits]
+history-enabled=false
+daily-limit-enabled=false
+
+[org/gnome/desktop/break-reminders]
+selected-breaks=[]
+
+[org/gnome/desktop/notifications/application/org-gnome-evolution-alarm-notify]
+enable=false

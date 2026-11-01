@@ -1,5 +1,5 @@
 Package: shai-installer
-Version: 0.3.3
+Version: 0.3.4
 Section: admin
 Priority: optional
 Architecture: amd64

@@ -23,6 +23,9 @@ STATE = Path(
 BRAND = Path(
     os.environ.get("SHAI_BRAND_LOCKUP", "/usr/share/shai/branding/shai-lockup-dark.svg")
 )
+SUMMARY = Path(
+    os.environ.get("SHAI_SYSTEM_SUMMARY", "/var/lib/shai-installer/system-summary.txt")
+)
 CSS = b"""
 window { background: #0B0F0C; color: #DDFBE0; }
 .header { background: #111812; border-bottom: 1px solid #263A2B; padding: 14px 20px; }
@@ -128,6 +131,18 @@ class ShellWindow(Gtk.ApplicationWindow):
             "Your Ubuntu installation has completed SHAI Setup.", "subtitle"
         ))
         content.append(label(self.choices(), "status"))
+        try:
+            summary_text = SUMMARY.read_text(encoding="utf-8")
+        except OSError:
+            summary_text = "The completed-system summary is unavailable."
+        summary = Gtk.TextView()
+        summary.set_editable(False)
+        summary.set_cursor_visible(False)
+        summary.set_monospace(True)
+        summary.set_vexpand(True)
+        summary.set_size_request(-1, 260)
+        summary.get_buffer().set_text(summary_text)
+        content.append(summary)
         content.append(label(
             "Setup installed the tested base profile, v2 desktop theme, Web Offline toggle, "
             "and app launchers. Live Home Assistant, device, AI, port, firewall, and update "

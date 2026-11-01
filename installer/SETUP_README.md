@@ -43,6 +43,15 @@ reviewed package reinstall plan when complete rollback is required.
 - Scheduled APT, Snap, and firmware refresh activity is changed to the existing
   SHAI manual-update policy. Manual Ubuntu updates remain available.
 - Ubuntu location and technical-problem reporting controls are disabled.
+- Existing Location portal grants are cleared, GeoClue is masked, and automatic
+  device location remains off until the user deliberately changes the policy.
+- Events and Tasks notifications, GNOME online-account providers, media sharing,
+  and GNOME Wellbeing recording/reminders are disabled. Setup does not delete
+  existing online-account credentials; SHAPP will later offer a separately
+  simulated and approved component removal.
+- Automatic date and time synchronization is disabled. The user must maintain
+  an accurate clock manually or explicitly re-enable Ubuntu time synchronization.
+  Setup repeats this warning in the completed-system summary.
 - The Web Offline toggle is installed. The user's Offline choice controls the
   mode left active after setup. Proxy-based Web Offline is not a host-wide
   firewall or air-gap and does not control software that ignores the desktop
@@ -56,6 +65,12 @@ reviewed package reinstall plan when complete rollback is required.
   successful setup. SHAI Appearance provides user-controlled switching between
   SHAI, Ubuntu defaults, and the appearance saved before SHAI. AIA is added
   only when Local AI is selected.
+- Ptyxis and GNOME Terminal profiles already present receive a reversible-style
+  SHAI palette with black background and `#33EE33` foreground. The palette file
+  remains selectable from terminal preferences.
+- The completion page and SHAI Home show local user roles plus the device name,
+  hardware model, processor, memory, disk capacity, OS and architecture, GNOME,
+  windowing system, kernel, and applied privacy defaults.
 
 ## Architecture choices
 

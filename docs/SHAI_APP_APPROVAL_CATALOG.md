@@ -301,12 +301,22 @@ generic Ubuntu package manager and cannot remove protected Ubuntu components.
   Advanced.
 - Compare resource requirements, license/source, network need, ports, data
   paths, dependencies, conflicts, and deployment modes.
+- Label every catalog item as `Offline`, `LAN only`, `Online to install`, or
+  `Online during use`. Online status must remain visible in list and detail
+  views, not hidden behind an information dialog.
 - Maintain one SHAI Compose project with separate service containers for the
   recommended stack.
 - Install, repair, update, back up, restore, or remove only cataloged
   SHAI-managed components.
 - Keep a protected `do not touch` list for Ubuntu-critical packages. SHAPP must
   direct users to Ubuntu tools for software outside SHAI ownership.
+- Inventory user-facing nonessential Ubuntu applications separately from
+  low-level packages. An unchecked installed app stages a removal only when its
+  exact package transaction passes the protected-package simulation gate.
+- Offer GNOME Online Accounts as an online-capable optional Ubuntu component.
+  Removing it may affect calendar, contacts, remote files, credentials, and
+  dependent packages; SHAPP must simulate and show the exact result before it
+  may run `apt-get purge gnome-online-accounts` after approval.
 
 ### It must not
 
@@ -315,6 +325,9 @@ generic Ubuntu package manager and cannot remove protected Ubuntu components.
 - Combine unrelated daemons into one giant container.
 - Silently choose host installation when a container/VM was selected.
 - Remove service data without separate explicit confirmation.
+- Remove or disable mouse/touchpad, keyboard, color management, accessibility,
+  Appearance, Ubuntu Desktop, power, sound, or display controls. Their owning
+  Ubuntu/GNOME packages are protected and read-only in SHAPP.
 
 ### Current status
 
