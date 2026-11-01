@@ -1,6 +1,6 @@
 # SHAI Setup Wave A installer
 
-This directory builds `shai-installer` 0.3.2 for a fresh, fully installed
+This directory builds `shai-installer` 0.3.3 for a fresh, fully installed
 Ubuntu Desktop 26.04 system on `amd64`.
 
 Installing the DEB is inert. It installs the SHAI Setup GUI, exact debloat
@@ -46,7 +46,8 @@ by `shai-setup` and validated again after sudo elevation.
 ```
 
 The package and checksum are written to `dist/`. The build is local and does
-not contact an online source.
+not contact an online source. `installer/SOURCE_DATE_EPOCH` fixes archive
+timestamps so the same source produces the same DEB locally and in GitHub CI.
 
 ## Safety properties
 
