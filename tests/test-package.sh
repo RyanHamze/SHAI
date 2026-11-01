@@ -1,8 +1,22 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
-bash -n installer/src/shai-installer installer/build.sh release/*.sh tools/*.sh connectivity/bin/*
+bash -n \
+    installer/build.sh \
+    installer/src/shai-installer \
+    installer/src/shai-theme-apply \
+    installer/src/shai-theme-default \
+    installer/src/shai-theme-reset \
+    release/*.sh \
+    tools/*.sh \
+    connectivity/bin/*
+python3 -m py_compile \
+    installer/src/shai-appearance \
+    installer/src/shai-plan-validator \
+    installer/src/shai-setup \
+    installer/src/shai-wave-a-shell
 ./installer/build.sh
 deb="$(find dist -maxdepth 1 -name 'shai-installer_*_amd64.deb' -print -quit)"
+tests/test-wave-a-package.sh "$deb"
 [[ "$(dpkg-deb --field "$deb" Architecture)" == amd64 ]]
 [[ "$(dpkg-deb --field "$deb" Package)" == shai-installer ]]
 control_listing="$(dpkg-deb --ctrl-tarfile "$deb" | tar -tf -)"

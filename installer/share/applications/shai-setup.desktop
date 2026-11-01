@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=SHAI Setup
+Comment=Configure Smart Home Automation and AI on this Ubuntu computer
+Exec=shai-setup
+Icon=shai
+Terminal=false
+Categories=System;Settings;
+Keywords=SHAI;setup;smart home;AI;
+StartupNotify=true
+X-GNOME-UsesNotifications=false

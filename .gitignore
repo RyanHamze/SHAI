@@ -1,6 +1,8 @@
 /dist/
 /installer/build/
 /signed-release/
+__pycache__/
+*.pyc
 *.asc
 *.gpg
 *SECRET*
