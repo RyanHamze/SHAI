@@ -134,10 +134,18 @@ python3 -m py_compile \
     "$TEST_DIR/root/usr/lib/shai-installer/shai-system-summary"
 
 mkdir -p "$TEST_DIR/log-home"
-HOME="$TEST_DIR/log-home" \
-    "$TEST_DIR/root/usr/lib/shai-installer/shai-shapp-log" \
-    DISCOVERED apt test-package "Test application" \
-    >/dev/null
+if [[ $EUID -eq 0 ]]; then
+    chown nobody:nogroup "$TEST_DIR/log-home"
+    runuser -u nobody -- env HOME="$TEST_DIR/log-home" \
+        "$TEST_DIR/root/usr/lib/shai-installer/shai-shapp-log" \
+        DISCOVERED apt test-package "Test application" \
+        >/dev/null
+else
+    HOME="$TEST_DIR/log-home" \
+        "$TEST_DIR/root/usr/lib/shai-installer/shai-shapp-log" \
+        DISCOVERED apt test-package "Test application" \
+        >/dev/null
+fi
 grep -Fq $'DISCOVERED\tapt\ttest-package\tTest application' \
     "$TEST_DIR/log-home/.local/state/shai/shapp/logs/$(date +%F).log"
 
