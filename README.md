@@ -1,25 +1,60 @@
 # SHAI
 
-SHAI means Smart Home Automation and AI. It configures an existing supported
-Ubuntu Desktop installation as a local-first home appliance. Ubuntu remains the
-operating system and owns its kernel, repositories, updates, firmware, terminal,
-and desktop base. SHAI is not an Ubuntu distribution and is not affiliated with
-or endorsed by Canonical. Ubuntu is a trademark of Canonical Ltd.
+SHAI means **Smart Home Automation and AI**. It is an explicit, guided
+installer that configures an existing supported Ubuntu Desktop installation as
+a local-first home appliance. Ubuntu remains the operating system and retains
+ownership of its kernel, repositories, drivers, firmware, terminal, package
+manager, and OS security updates.
 
-Version 0.1.2 is a checkpoint-tested development release for Ubuntu 26.04
-`amd64`. Installing the `.deb` is inert. Changes begin only after the user runs
-`sudo shai-installer --checkpoint "CHECKPOINT NAME"`, reviews the complete APT
-simulation, and explicitly enters `APPLY`.
+SHAI is not an operating system, Ubuntu distribution, ISO, or replacement
+shell. It is not affiliated with or endorsed by Canonical. Ubuntu is a
+trademark of Canonical Ltd.
 
-GitHub Actions builds, tests, hashes, and attests packages. Production APT
-metadata must additionally be signed by the offline SHAI archive key. Optional
-SHAI applications must be listed by digest in a separately signed app catalog.
-Private keys, passphrases, and hardware-token PINs are never stored in this
-repository or GitHub Actions. Until offline signatures are attached and
-verified, releases remain drafts and are not production-trusted.
+## Current package
 
-See [SECURITY.md](SECURITY.md), [release/KEY_CEREMONY.md](release/KEY_CEREMONY.md),
-and [release/RELEASE_PROCESS.md](release/RELEASE_PROCESS.md).
+Version `0.3.2` targets Ubuntu Desktop 26.04 on `amd64`. Installing the DEB is
+inert: no debloat, theme, policy, or application change occurs until the normal
+desktop user launches SHAI Setup, reviews the plan, and approves execution in a
+visible Ubuntu terminal with normal sudo authentication.
 
-No open-source license has been selected. Copyright Aabey LLC; no license is
-granted beyond GitHub's applicable terms until a LICENSE file is published.
+```bash
+sudo apt install ./shai-installer_0.3.2_amd64.deb
+shai-setup
+```
+
+The current package provides:
+
+- a protected, exact-package Ubuntu debloat workflow;
+- SHAI Setup with architecture, smart-home, AI, and offline choices;
+- a reversible SHAI desktop theme with corrected SHAI wordmark wallpapers;
+- SHAI Appearance for Ubuntu Default/SHAI profile, mode, accent, wallpaper,
+  and pre-SHAI restoration choices;
+- the proxy-based Web Offline toggle;
+- SHAI Home, SHAPP, SHAI Health, and AIA handoff applications;
+- local evidence, before/after benchmarks, logs, and final health checks.
+
+Optional applications, Docker services, Home Assistant, AI runtimes, and model
+weights are not silently installed by the base package. SHAPP remains the
+planned user-approved application manager.
+
+## Build and test
+
+```bash
+./installer/build.sh
+./tests/test-wave-a-package.sh
+```
+
+GitHub Actions builds, tests, hashes, and attests the DEB. Production APT
+metadata additionally requires the offline SHAI archive signature. Private
+keys, passphrases, and hardware-token PINs are never stored in this repository
+or GitHub Actions.
+
+Start with [START_HERE.md](START_HERE.md), then review
+[the Setup specification](docs/WAVE_A_SETUP_SPEC.md),
+[the application catalog](docs/SHAI_APP_APPROVAL_CATALOG.md), and
+[SECURITY.md](SECURITY.md).
+
+No project-wide open-source license has been selected. Copyright Aabey LLC; no
+license is granted beyond GitHub's applicable terms until a LICENSE file is
+published. Bundled third-party-derived theme material retains its own license
+notice under `branding/theme/`.
