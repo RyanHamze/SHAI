@@ -12,13 +12,13 @@ trademark of Canonical Ltd.
 
 ## Current package
 
-Version `0.3.2` targets Ubuntu Desktop 26.04 on `amd64`. Installing the DEB is
+Version `0.3.3` targets Ubuntu Desktop 26.04 on `amd64`. Installing the DEB is
 inert: no debloat, theme, policy, or application change occurs until the normal
 desktop user launches SHAI Setup, reviews the plan, and approves execution in a
 visible Ubuntu terminal with normal sudo authentication.
 
 ```bash
-sudo apt install ./shai-installer_0.3.2_amd64.deb
+sudo apt install ./shai-installer_0.3.3_amd64.deb
 shai-setup
 ```
 

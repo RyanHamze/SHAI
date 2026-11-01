@@ -3,7 +3,7 @@ set -Eeuo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 readonly ROOT
-readonly PACKAGE="${1:-$ROOT/dist/shai-installer_0.3.2_amd64.deb}"
+readonly PACKAGE="${1:-$ROOT/dist/shai-installer_0.3.3_amd64.deb}"
 TEST_DIR="$(mktemp -d /tmp/shai-wave-a-package-test.XXXXXX)"
 readonly TEST_DIR
 USER_NAME="$(id -un)"
