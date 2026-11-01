@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# shellcheck disable=SC1091,SC2016
 
 # Standardized, read-only checkpoint collected before and after each debloat wave.
 

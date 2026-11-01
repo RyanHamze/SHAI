@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# shellcheck disable=SC2016,SC2094
 
 # Read-only Ubuntu baseline collector. Run as root after an approved update.
 # It inventories system state without copying credential stores or private keys.
