@@ -1,11 +1,11 @@
 # SHAI Setup Wave A installer
 
-This directory builds `shai-installer` 0.3.3 for a fresh, fully installed
+This directory builds `shai-installer` 0.3.4 for a fresh, fully installed
 Ubuntu Desktop 26.04 system on `amd64`.
 
 Installing the DEB is inert. It installs the SHAI Setup GUI, exact debloat
 catalogs, protected execution engine, SHAI desktop theme assets, documentation, and
-Wave A application shells. It does not debloat Ubuntu or change desktop
+initial application shells. It does not debloat Ubuntu or change desktop
 settings during package installation.
 
 Launch setup as the normal desktop user:
@@ -19,14 +19,14 @@ The graphical sequence is:
 1. Review and explicitly approve the tested debloat scope.
 2. Choose one managed Docker stack or compatible direct Ubuntu installs.
 3. Choose smart-home intent and local-AI intent.
-4. Review the exact Wave A plan.
+4. Review the exact Setup plan.
 5. Apply in a separate visible Ubuntu terminal using normal sudo authentication.
 6. Run health checks, apply the reversible SHAI desktop theme, save the architecture, then open
    SHAI Home and SHAPP.
 
-Wave A does not install Docker, Home Assistant, MQTT, Zigbee, Z-Wave, ESPHome,
+Setup does not install Docker, Home Assistant, MQTT, Zigbee, Z-Wave, ESPHome,
 Matter, Node-RED, media servers, voice tools, AI runtimes, or model weights.
-Those are selected later in SHAPP. The Wave A Home, SHAPP, Health, and AIA
+Those are selected later in SHAPP. The initial Home, SHAPP, Health, and AIA
 windows are honest handoff shells and do not pretend their later backends exist.
 
 The existing terminal assessment path remains available:
@@ -36,7 +36,7 @@ sudo shai-installer --assess --user "$USER"
 ```
 
 The legacy checkpoint-test apply path remains for development VM regression
-tests. Normal Wave A application uses a strict user-owned JSON plan generated
+tests. Normal Setup application uses a strict user-owned JSON plan generated
 by `shai-setup` and validated again after sudo elevation.
 
 ## Build
@@ -52,7 +52,7 @@ timestamps so the same source produces the same DEB locally and in GitHub CI.
 ## Safety properties
 
 - no changes when the package is merely installed or Setup is merely opened;
-- no online checks or downloads in Wave A;
+- no online checks or downloads in base Setup;
 - no broad package purge, broad autoremove, kernel removal, or disk operation;
 - authoritative APT simulation before each exact removal wave;
 - protected-package gate and no-install gate;

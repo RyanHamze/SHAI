@@ -3,6 +3,20 @@
 Date: 2026-10-31
 Status: implementation specification
 
+## Revision 0.3.4
+
+- Disable Events and Tasks notifications and all GNOME Online Accounts
+  providers without deleting stored account credentials.
+- Leave media sharing off, clear existing app location grants, disable location,
+  and hide/disable Wellbeing recording, limits, and reminders.
+- Disable automatic date and time and repeat that fact in the final summary.
+- Protect Ubuntu/GNOME input, keyboard, color, accessibility, Appearance,
+  desktop, power, sound, and display packages from SHAI removal.
+- Install the SHAI Matrix terminal palette with black background and `#33EE33`
+  foreground for existing Ptyxis and GNOME Terminal profiles.
+- Generate a post-setup summary containing local users and roles plus the
+  About-style hardware, OS, desktop, windowing, kernel, and privacy state.
+
 ## Revision 0.2.1
 
 - Removed the internal `Wave A` label from every user-visible Setup, terminal,

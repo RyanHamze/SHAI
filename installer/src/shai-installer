@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
-readonly SHAI_VERSION="0.3.3"
+readonly SHAI_VERSION="0.3.4"
 readonly LIB_DIR="/usr/lib/shai-installer"
 readonly STATE_DIR="/var/lib/shai-installer"
 readonly LOG_DIR="/var/log/shai-installer"
@@ -240,11 +240,16 @@ capture_prechange_state() {
     for path in \
         /etc/apt/apt.conf.d/99-shai-manual-updates \
         /etc/dconf/db/local.d/20-shai-web-offline \
+        /etc/dconf/db/local.d/30-shai-privacy \
         /etc/dconf/profile/user \
         /etc/firefox/policies/policies.json \
+        /usr/local/share/applications/gnome-wellbeing-panel.desktop \
         /usr/local/bin/shai-web-connectivity-toggle \
         /usr/share/applications/shai-web-connectivity-toggle.desktop \
-        "$TARGET_HOME/Desktop/shai-web-connectivity-toggle.desktop"; do
+        "$TARGET_HOME/Desktop/shai-web-connectivity-toggle.desktop" \
+        "$TARGET_HOME/.config/rygel.conf" \
+        "$TARGET_HOME/.config/systemd/user/rygel.service" \
+        "$TARGET_HOME/.local/share/org.gnome.Ptyxis/palettes/shai.palette"; do
         backup_path "$path"
     done
     : > "$RUN_DIR/backups/systemd-state.tsv"
@@ -414,12 +419,130 @@ PY
     run_as_user gsettings set org.gnome.shell favorite-apps "$filtered"
 }
 
+gsettings_if_available() {
+    local schema="$1" key="$2" value="$3"
+    local schema_id="${schema%%:*}"
+    if run_as_user gsettings list-schemas | grep -Fxq "$schema_id" \
+        && run_as_user gsettings writable "$schema" "$key" 2>/dev/null | grep -qx true; then
+        run_as_user gsettings set "$schema" "$key" "$value"
+    fi
+}
+
+configure_terminal_theme() {
+    local palette_dir="$TARGET_HOME/.local/share/org.gnome.Ptyxis/palettes"
+    local profiles uuid
+    run_as_user install -d -m 0700 "$palette_dir"
+    run_as_user install -m 0644 "$LIB_DIR/assets/shai.palette" "$palette_dir/shai.palette"
+
+    if run_as_user gsettings list-schemas | grep -Fxq org.gnome.Ptyxis; then
+        profiles="$(run_as_user gsettings get org.gnome.Ptyxis profile-uuids 2>/dev/null || printf '[]')"
+        while IFS= read -r uuid; do
+            [[ -n "$uuid" ]] || continue
+            run_as_user gsettings set \
+                "org.gnome.Ptyxis.Profile:/org/gnome/Ptyxis/Profiles/$uuid/" \
+                palette shai
+            run_as_user gsettings set \
+                "org.gnome.Ptyxis.Profile:/org/gnome/Ptyxis/Profiles/$uuid/" \
+                opacity 1.0
+        done < <(python3 - "$profiles" <<'PY'
+import ast
+import sys
+
+raw = sys.argv[1]
+if raw.startswith("@as "):
+    raw = raw[4:]
+for item in ast.literal_eval(raw):
+    print(item)
+PY
+)
+    fi
+
+    if run_as_user gsettings list-schemas | grep -Fxq org.gnome.Terminal.ProfilesList; then
+        profiles="$(run_as_user gsettings get org.gnome.Terminal.ProfilesList list 2>/dev/null || printf '[]')"
+        while IFS= read -r uuid; do
+            [[ -n "$uuid" ]] || continue
+            run_as_user gsettings set \
+                "org.gnome.Terminal.Legacy.Profile:/org/gnome/terminal/legacy/profiles:/:$uuid/" \
+                use-theme-colors false
+            run_as_user gsettings set \
+                "org.gnome.Terminal.Legacy.Profile:/org/gnome/terminal/legacy/profiles:/:$uuid/" \
+                foreground-color '#33EE33'
+            run_as_user gsettings set \
+                "org.gnome.Terminal.Legacy.Profile:/org/gnome/terminal/legacy/profiles:/:$uuid/" \
+                background-color '#000000'
+        done < <(python3 - "$profiles" <<'PY'
+import ast
+import sys
+
+raw = sys.argv[1]
+if raw.startswith("@as "):
+    raw = raw[4:]
+for item in ast.literal_eval(raw):
+    print(item)
+PY
+)
+    fi
+}
+
+configure_privacy_defaults() {
+    local rygel_config="$TARGET_HOME/.config/rygel.conf"
+    local rygel_mask="$TARGET_HOME/.config/systemd/user/rygel.service"
+
+    gsettings_if_available org.gnome.desktop.notifications.application:/org/gnome/desktop/notifications/application/org-gnome-evolution-alarm-notify/ enable false
+    gsettings_if_available org.gnome.desktop.screen-time-limits history-enabled false
+    gsettings_if_available org.gnome.desktop.screen-time-limits daily-limit-enabled false
+    gsettings_if_available org.gnome.desktop.break-reminders selected-breaks "[]"
+    gsettings_if_available org.gnome.online-accounts whitelisted-providers "['']"
+
+    if command -v flatpak >/dev/null 2>&1; then
+        run_as_user flatpak permission-remove location location 2>/dev/null || true
+    fi
+
+    run_as_user install -d -m 0700 "$(dirname "$rygel_config")" "$(dirname "$rygel_mask")"
+    python3 - "$rygel_config" <<'PY'
+import configparser
+import pathlib
+import sys
+
+path = pathlib.Path(sys.argv[1])
+config = configparser.ConfigParser()
+if path.exists():
+    config.read(path)
+for section in ("general", "MediaExport", "Tracker", "Tracker3"):
+    if not config.has_section(section):
+        config.add_section(section)
+config.set("general", "upnp-enabled", "false")
+config.set("MediaExport", "enabled", "false")
+config.set("Tracker", "enabled", "false")
+config.set("Tracker3", "enabled", "false")
+temporary = path.with_suffix(".tmp")
+with temporary.open("w", encoding="utf-8") as stream:
+    config.write(stream)
+temporary.chmod(0o600)
+temporary.replace(path)
+PY
+    chown "$TARGET_USER:$(id -gn "$TARGET_USER")" "$rygel_config"
+    if [[ ! -e "$rygel_mask" && ! -L "$rygel_mask" ]]; then
+        ln -s /dev/null "$rygel_mask"
+        chown -h "$TARGET_USER:$(id -gn "$TARGET_USER")" "$rygel_mask"
+    fi
+    run_as_user systemctl --user stop rygel.service 2>/dev/null || true
+
+    install -d -m 0755 /usr/local/share/applications
+    install -m 0644 "$LIB_DIR/assets/gnome-wellbeing-panel.desktop" \
+        /usr/local/share/applications/gnome-wellbeing-panel.desktop
+
+    timedatectl set-ntp false
+    configure_terminal_theme
+}
+
 install_validated_policy() {
     local desktop_dir="$TARGET_HOME/Desktop" path unit merged_policy
     install -m 0755 "$LIB_DIR/assets/shai-web-connectivity-toggle" /usr/local/bin/shai-web-connectivity-toggle
     install -m 0644 "$LIB_DIR/assets/shai-web-connectivity-toggle.desktop" /usr/share/applications/shai-web-connectivity-toggle.desktop
     install -d -m 0755 /etc/dconf/db/local.d /etc/dconf/profile /etc/firefox/policies
     install -m 0644 "$LIB_DIR/assets/20-shai-web-offline" /etc/dconf/db/local.d/20-shai-web-offline
+    install -m 0644 "$LIB_DIR/assets/30-shai-privacy" /etc/dconf/db/local.d/30-shai-privacy
     if [[ ! -f /etc/dconf/profile/user ]]; then
         install -m 0644 "$LIB_DIR/assets/dconf-user-profile" /etc/dconf/profile/user
     elif ! grep -Fxq 'system-db:local' /etc/dconf/profile/user; then
@@ -460,6 +583,7 @@ PY
     done < "$LIB_DIR/catalog/09-yaru-color-variant-paths.list"
 
     configure_user_settings
+    configure_privacy_defaults
 }
 
 install_desktop_launcher() {
@@ -613,6 +737,7 @@ install_validated_policy
 apply_wave_a_branding_and_choices
 clear_expected_removed_unit_failures
 health_check
+"$LIB_DIR/shai-system-summary" "$TARGET_USER" "$STATE_DIR"
 dpkg-query -W -f='${binary:Package}\t${Version}\n' > "$RUN_DIR/packages-after.tsv"
 "$LIB_DIR/collect-debloat-benchmark" installer-after > "$RUN_DIR/benchmark-after.md"
 printf '%s\n' "$SHAI_VERSION" > "$STATE_DIR/applied-version"

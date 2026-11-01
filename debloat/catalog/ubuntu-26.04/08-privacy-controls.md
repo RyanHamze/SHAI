@@ -8,3 +8,9 @@
 - Keep `ubuntu-insights` and Apport absent.
 - Set GNOME technical-problem reporting to false.
 - Set GNOME location services to false and mask GeoClue so D-Bus activation cannot restart it.
+- Remove the shared Location portal permission-store entry so no previously
+  permitted application retains a location grant.
+- Disable Events and Tasks notifications and all GNOME Online Accounts
+  providers. Do not delete existing account credentials during base setup.
+- Disable media sharing, Wellbeing history/limits/reminders, and automatic time
+  synchronization. Report the manual-time requirement at completion.

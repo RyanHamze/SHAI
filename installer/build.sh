@@ -3,7 +3,7 @@ set -Eeuo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 readonly ROOT
-readonly VERSION="0.3.3"
+readonly VERSION="0.3.4"
 readonly PACKAGE="shai-installer_${VERSION}_amd64"
 BUILD_ROOT="$(mktemp -d "/tmp/shai-installer-build-${VERSION}.XXXXXX")"
 readonly BUILD_ROOT
@@ -43,6 +43,7 @@ install -m 0755 "$ROOT/installer/src/shai-theme-reset" "$STAGE/usr/bin/shai-them
 install -m 0755 "$ROOT/installer/src/shai-theme-default" "$STAGE/usr/bin/shai-theme-default"
 install -m 0755 "$ROOT/installer/src/shai-appearance" "$STAGE/usr/bin/shai-appearance"
 install -m 0755 "$ROOT/installer/src/shai-plan-validator" "$STAGE/usr/lib/shai-installer/shai-plan-validator"
+install -m 0755 "$ROOT/installer/src/shai-system-summary" "$STAGE/usr/lib/shai-installer/shai-system-summary"
 install -m 0755 "$ROOT/tools/collect_debloat_benchmark.sh" "$STAGE/usr/lib/shai-installer/collect-debloat-benchmark"
 install -m 0755 "$ROOT/tools/configure_manual_updates.sh" "$STAGE/usr/lib/shai-installer/configure-manual-updates"
 install -m 0755 "$ROOT/tools/restore_automatic_updates.sh" "$STAGE/usr/lib/shai-installer/restore-automatic-updates"
@@ -68,6 +69,9 @@ install -m 0644 "$ROOT/connectivity/share/applications/shai-web-connectivity-tog
 install -m 0644 "$ROOT/connectivity/etc/dconf/db/local.d/20-shai-web-offline" "$STAGE/usr/lib/shai-installer/assets/20-shai-web-offline"
 install -m 0644 "$ROOT/connectivity/etc/dconf/profile/user" "$STAGE/usr/lib/shai-installer/assets/dconf-user-profile"
 install -m 0644 "$ROOT/connectivity/etc/firefox/policies/policies.json" "$STAGE/usr/lib/shai-installer/assets/firefox-policies.json"
+install -m 0644 "$ROOT/installer/assets/30-shai-privacy" "$STAGE/usr/lib/shai-installer/assets/30-shai-privacy"
+install -m 0644 "$ROOT/installer/assets/gnome-wellbeing-panel.desktop" "$STAGE/usr/lib/shai-installer/assets/gnome-wellbeing-panel.desktop"
+install -m 0644 "$ROOT/installer/assets/shai.palette" "$STAGE/usr/lib/shai-installer/assets/shai.palette"
 install -m 0644 "$ROOT/installer/README.md" "$STAGE/usr/share/doc/shai-installer/README.md"
 install -m 0644 "$ROOT/installer/SETUP_README.md" "$STAGE/usr/share/doc/shai-installer/SETUP_README.md"
 install -m 0644 "$ROOT/installer/share/applications/shai-setup.desktop" "$STAGE/usr/share/applications/shai-setup.desktop"

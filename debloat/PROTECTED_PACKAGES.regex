@@ -3,9 +3,10 @@
 ^(grub|grub2|shim|efibootmgr)
 ^(apt|apt-utils|dpkg|sudo|polkitd|policykit-1)$
 ^(ubuntu-desktop|ubuntu-desktop-minimal|ubuntu-minimal|ubuntu-standard)$
-^(gdm3|gnome-shell|gnome-session|gnome-control-center|nautilus)$
+^(gdm3|gnome-shell|gnome-session|gnome-control-center|gnome-control-center-data|gnome-settings-daemon|nautilus|mutter|xwayland)$
 ^(network-manager|netplan.io|systemd-resolved|wpa-supplicant)$
 ^(openssh-client|openssh-server|openssh-sftp-server)$
 ^(pipewire|pipewire-audio|pipewire-pulse|wireplumber|alsa-base)$
 ^(snapd|firefox|avahi-daemon|packagekit|cloud-init|cloud-init-base)$
-^(brltty|orca)$
+^(brltty|orca|colord|power-profiles-daemon|upower|ubuntu-settings)$
+^(xserver-xorg-input-libinput|libinput-tools|switcheroo-control)$

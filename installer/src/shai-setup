@@ -28,6 +28,9 @@ README = Path(
 RESULT = Path(
     os.environ.get("SHAI_SETUP_RESULT", "/var/lib/shai-installer/setup-result.json")
 )
+SUMMARY = Path(
+    os.environ.get("SHAI_SYSTEM_SUMMARY", "/var/lib/shai-installer/system-summary.txt")
+)
 GREEN = "#33EE33"
 
 CSS = b"""
@@ -344,6 +347,16 @@ class SetupWindow(Gtk.ApplicationWindow):
         ))
         self.complete_status = label("SHAI Home is opening.", "status")
         page.append(self.complete_status)
+        self.complete_summary = Gtk.TextView()
+        self.complete_summary.set_editable(False)
+        self.complete_summary.set_cursor_visible(False)
+        self.complete_summary.set_monospace(True)
+        self.complete_summary.set_vexpand(True)
+        self.complete_summary.set_size_request(-1, 300)
+        self.complete_summary.get_buffer().set_text(
+            "The completed-system summary will appear here after validation."
+        )
+        page.append(self.complete_summary)
         page.append(label(
             "SHAI Home shows the environment summary. Continue to SHAPP to select local apps "
             "and tools when its catalog is available.",
@@ -431,8 +444,11 @@ class SetupWindow(Gtk.ApplicationWindow):
             f"6. Smart-home intent: {'Yes' if self.smart_home.get_active() else 'No'}.",
             f"7. Local-AI intent: {'Yes; install AIA launcher only' if self.local_ai.get_active() else 'No'}.",
             f"8. Offline-by-default: {'Yes' if self.offline_mode.get_active() else 'No'}.",
-            "9. Save the choices for SHAPP and run final health checks.",
-            "10. Open SHAI Home, then continue to SHAPP.",
+            "9. Disable Events and Tasks notifications and GNOME online-account providers.",
+            "10. Disable media sharing, location grants, Wellbeing tracking, and automatic time sync.",
+            "11. Apply the black and #33EE33 SHAI terminal palette.",
+            "12. Save choices, inventory the completed system, and run final health checks.",
+            "13. Show the completed-system summary and open SHAI Home.",
         ]
         self.review.get_buffer().set_text("\n".join(lines))
 
@@ -504,6 +520,11 @@ class SetupWindow(Gtk.ApplicationWindow):
         if result.get("plan_id") == self.plan_id:
             if result.get("status") == "success":
                 self.apply_status.set_text("SHAI Setup passed all final health checks.")
+                try:
+                    summary = SUMMARY.read_text(encoding="utf-8")
+                except OSError:
+                    summary = "System summary was not available. Review the installer log."
+                self.complete_summary.get_buffer().set_text(summary)
                 self.show_step(5)
                 GLib.timeout_add(800, self.open_default_shells)
             else:
