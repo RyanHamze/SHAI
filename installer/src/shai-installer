@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
-readonly SHAI_VERSION="0.1.2"
+readonly SHAI_VERSION="0.3.2"
 readonly LIB_DIR="/usr/lib/shai-installer"
 readonly STATE_DIR="/var/lib/shai-installer"
 readonly LOG_DIR="/var/log/shai-installer"
@@ -10,16 +10,26 @@ readonly LOCK_FILE="/run/lock/shai-installer.lock"
 MODE="apply"
 TARGET_USER="${SUDO_USER:-}"
 CHECKPOINT_LABEL=""
+PLAN_PATH=""
+PLAN_ID=""
+PLAN_ARCHITECTURE=""
+PLAN_SMART_HOME=""
+PLAN_LOCAL_AI=""
+PLAN_OFFLINE_MODE=""
+VALIDATED_PLAN=""
 
 usage() {
     cat <<'EOF'
 Usage: sudo shai-installer [--assess|--status] [--user USER] [--checkpoint LABEL]
+       sudo shai-installer --apply-plan PLAN.json
 
   --assess   Simulate and report without changing the computer.
   --status   Show whether the SHAI test profile has been applied.
   --user     Desktop user whose GNOME settings should be configured.
   --checkpoint
              Required for apply mode. Name of the verified VM checkpoint.
+  --apply-plan
+             Apply a validated plan created by the graphical SHAI Setup app.
 EOF
 }
 
@@ -27,6 +37,11 @@ while (($#)); do
     case "$1" in
         --assess) MODE="assess" ;;
         --status) MODE="status" ;;
+        --apply-plan)
+            MODE="plan"
+            shift
+            PLAN_PATH="${1:?--apply-plan requires a plan file}"
+            ;;
         --user)
             shift
             TARGET_USER="${1:?--user requires a username}"
@@ -54,6 +69,23 @@ fi
 if [[ ${EUID} -ne 0 ]]; then
     printf 'Run this command with sudo: sudo shai-installer%s\n' "$([[ "$MODE" == assess ]] && printf ' --assess')" >&2
     exit 1
+fi
+
+cleanup() {
+    [[ -z "$VALIDATED_PLAN" ]] || rm -f -- "$VALIDATED_PLAN"
+}
+trap cleanup EXIT
+
+if [[ "$MODE" == "plan" ]]; then
+    VALIDATED_PLAN="$(mktemp /run/shai-setup-plan.XXXXXX.json)"
+    "$LIB_DIR/shai-plan-validator" "$PLAN_PATH" > "$VALIDATED_PLAN"
+    TARGET_USER="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["target_user"])' "$VALIDATED_PLAN")"
+    PLAN_ID="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["plan_id"])' "$VALIDATED_PLAN")"
+    PLAN_ARCHITECTURE="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["architecture"])' "$VALIDATED_PLAN")"
+    PLAN_SMART_HOME="$(python3 -c 'import json,sys; print(str(json.load(open(sys.argv[1]))["smart_home"]).lower())' "$VALIDATED_PLAN")"
+    PLAN_LOCAL_AI="$(python3 -c 'import json,sys; print(str(json.load(open(sys.argv[1]))["local_ai"]).lower())' "$VALIDATED_PLAN")"
+    PLAN_OFFLINE_MODE="$(python3 -c 'import json,sys; print(str(json.load(open(sys.argv[1]))["offline_mode"]).lower())' "$VALIDATED_PLAN")"
+    CHECKPOINT_LABEL="SHAI Setup - user-approved local plan $PLAN_ID"
 fi
 
 exec 9>"$LOCK_FILE"
@@ -84,8 +116,30 @@ touch "$RUN_LOG"
 chmod 0640 "$RUN_LOG"
 exec > >(tee -a "$RUN_LOG") 2>&1
 
+write_setup_result() {
+    local status="$1" message="$2"
+    [[ "$MODE" == plan && -n "$PLAN_ID" ]] || return 0
+    install -d -m 0755 "$STATE_DIR"
+    python3 - "$STATE_DIR/setup-result.json" "$PLAN_ID" "$status" "$message" "$RUN_LOG" <<'PY'
+import json
+import pathlib
+import sys
+
+path = pathlib.Path(sys.argv[1])
+payload = {
+    "plan_id": sys.argv[2],
+    "status": sys.argv[3],
+    "message": sys.argv[4],
+    "log": sys.argv[5],
+}
+path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+path.chmod(0o644)
+PY
+}
+
 on_error() {
     local rc=$?
+    write_setup_result failure "Setup stopped with exit code $rc. Review the visible terminal and log." || true
     printf '\nSHAI stopped after an error (exit %s). Review: %s\n' "$rc" "$RUN_LOG" >&2
     exit "$rc"
 }
@@ -157,7 +211,7 @@ preflight_health() {
             fi
         done
     fi
-    for command in apt-get dconf dbus-run-session dpkg-query flock gsettings python3 runuser snap systemctl; do
+    for command in apt-get dconf dbus-run-session dpkg-query flock gio gsettings python3 runuser snap systemctl; do
         command -v "$command" >/dev/null 2>&1 || {
             printf 'Preflight blocked: required command is missing: %s\n' "$command" >&2
             return 1
@@ -325,11 +379,16 @@ configure_user_settings() {
     local favorites filtered
     run_as_user gsettings set org.gnome.system.location enabled false
     run_as_user gsettings set org.gnome.desktop.privacy report-technical-problems false || true
-    run_as_user /usr/local/bin/shai-web-connectivity-toggle offline
+    if [[ "$MODE" == plan && "$PLAN_OFFLINE_MODE" != true ]]; then
+        run_as_user /usr/local/bin/shai-web-connectivity-toggle online
+    else
+        run_as_user /usr/local/bin/shai-web-connectivity-toggle offline
+    fi
 
     favorites="$(run_as_user gsettings get org.gnome.shell favorite-apps)"
     filtered="$(python3 - "$favorites" <<'PY'
 import ast
+import pathlib
 import sys
 
 items = ast.literal_eval(sys.argv[1])
@@ -346,6 +405,9 @@ if "org.gnome.Nautilus.desktop" not in items:
     items.insert(0, "org.gnome.Nautilus.desktop")
 if "org.gnome.Ptyxis.desktop" not in items:
     items.append("org.gnome.Ptyxis.desktop")
+for desktop_id in ("shai-home.desktop", "shai-shapp.desktop"):
+    if pathlib.Path("/usr/share/applications", desktop_id).exists() and desktop_id not in items:
+        items.append(desktop_id)
 print("[" + ", ".join(repr(item) for item in items) + "]")
 PY
 )"
@@ -380,7 +442,7 @@ PY
     dconf update
 
     if [[ -d "$desktop_dir" ]]; then
-        install -m 0755 -o "$TARGET_USER" -g "$(id -gn "$TARGET_USER")" \
+        run_as_user install -m 0755 \
             "$LIB_DIR/assets/shai-web-connectivity-toggle.desktop" \
             "$desktop_dir/shai-web-connectivity-toggle.desktop"
     fi
@@ -397,6 +459,52 @@ PY
         [[ -e "$path" ]] && rm -rf --one-file-system -- "$path"
     done < "$LIB_DIR/catalog/09-yaru-color-variant-paths.list"
 
+    configure_user_settings
+}
+
+install_desktop_launcher() {
+    local launcher="$1" desktop_dir="$TARGET_HOME/Desktop"
+    install -m 0644 "$LIB_DIR/assets/launchers/$launcher" "/usr/share/applications/$launcher"
+    if [[ -d "$desktop_dir" ]]; then
+        run_as_user install -m 0755 \
+            "$LIB_DIR/assets/launchers/$launcher" "$desktop_dir/$launcher"
+        run_as_user gio set "$desktop_dir/$launcher" metadata::trusted true 2>/dev/null || true
+    fi
+}
+
+apply_wave_a_branding_and_choices() {
+    local state_file="$STATE_DIR/setup-choices.json"
+    [[ "$MODE" == plan ]] || return 0
+
+    install_desktop_launcher shai-home.desktop
+    install_desktop_launcher shai-shapp.desktop
+    install_desktop_launcher shai-health.desktop
+    install_desktop_launcher shai-appearance.desktop
+    if [[ "$PLAN_LOCAL_AI" == true ]]; then
+        install_desktop_launcher shai-aia.desktop
+    else
+        rm -f /usr/share/applications/shai-aia.desktop "$TARGET_HOME/Desktop/shai-aia.desktop"
+    fi
+
+    run_as_user /usr/bin/shai-theme-apply
+
+    install -d -m 0755 "$STATE_DIR"
+    python3 - "$VALIDATED_PLAN" "$state_file" "$STAMP" <<'PY'
+import json
+import pathlib
+import sys
+
+source = pathlib.Path(sys.argv[1])
+destination = pathlib.Path(sys.argv[2])
+data = json.loads(source.read_text(encoding="utf-8"))
+data.update({
+    "applied_at": sys.argv[3],
+    "wave": "A",
+    "optional_apps_installed": False,
+})
+destination.write_text(json.dumps(data, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+destination.chmod(0o644)
+PY
     configure_user_settings
 }
 
@@ -465,6 +573,7 @@ Validated configuration proposal:
   - disable location and reporting services without removing GNOME integration
   - install the proxy-based Web Offline toggle and default Firefox to system proxy
   - unpin Firefox and App Center; pin Terminal; remove stale dock pins
+  - in graphical setup, apply the reversible SHAI desktop theme and save architecture choices
 
 Important: Web Offline is proxy-level control, not host firewall enforcement.
 Rollback for this test is the Hyper-V checkpoint.
@@ -475,15 +584,21 @@ if [[ "$MODE" == "assess" ]]; then
     exit 0
 fi
 
-if [[ -z "$CHECKPOINT_LABEL" ]]; then
+if [[ "$MODE" != plan && -z "$CHECKPOINT_LABEL" ]]; then
     printf '\nApply mode requires a verified checkpoint name.\n' >&2
     printf 'Example: sudo shai-installer --checkpoint "fresh-ubuntu-updated"\n' >&2
     exit 2
 fi
 
-printf '\nType APPLY to perform this exact proposal: '
-read -r confirmation
-[[ "$confirmation" == APPLY ]] || { printf 'Cancelled. No changes were made.\n'; exit 0; }
+if [[ "$MODE" == plan ]]; then
+    printf '\nGraphical SHAI Setup plan validated for %s.\n' "$TARGET_USER"
+    printf 'Architecture: %s | Smart home: %s | Local AI: %s | Offline: %s\n' \
+        "$PLAN_ARCHITECTURE" "$PLAN_SMART_HOME" "$PLAN_LOCAL_AI" "$PLAN_OFFLINE_MODE"
+else
+    printf '\nType APPLY to perform this exact proposal: '
+    read -r confirmation
+    [[ "$confirmation" == APPLY ]] || { printf 'Cancelled. No changes were made.\n'; exit 0; }
+fi
 capture_prechange_state
 
 for wave in "${WAVES[@]}"; do
@@ -495,13 +610,15 @@ if snap list thunderbird >/dev/null 2>&1; then
 fi
 
 install_validated_policy
+apply_wave_a_branding_and_choices
 clear_expected_removed_unit_failures
 health_check
 dpkg-query -W -f='${binary:Package}\t${Version}\n' > "$RUN_DIR/packages-after.tsv"
 "$LIB_DIR/collect-debloat-benchmark" installer-after > "$RUN_DIR/benchmark-after.md"
 printf '%s\n' "$SHAI_VERSION" > "$STATE_DIR/applied-version"
 printf '%s\n' "$STAMP" > "$STATE_DIR/latest-run"
+write_setup_result success "SHAI Setup passed all final health checks."
 
-printf '\nSHAI checkpoint-test profile applied successfully.\n'
+printf '\nSHAI profile applied successfully.\n'
 printf 'Evidence: %s\nLog: %s\n' "$RUN_DIR" "$RUN_LOG"
 printf 'Reboot before completing desktop validation.\n'

@@ -1,0 +1,19 @@
+# Current decisions
+
+Updated 2026-10-30; these supersede conflicting October 24 plan details.
+
+- Claude involvement is stopped at Ryan's request after hitting its usage limit. Rebranding is deferred. Preserve received research/reference assets, but do not assign further Claude work or require artwork completion before installer work.
+
+- Strict offline policy: no online checks, probes or downloads unless specifically authorized. Label operations by online source and scope permission to the action; scheduled online checks/downloads/installs default off. See NETWORK_POLICY.md. LAN-only access requires approved local integrations; true air-gapped mode also blocks LAN. This policy is recorded, not yet implemented or tested.
+
+- Name is SHAI, Smart Home Automation and AI; not an OS or shell.
+- Target test installation: full Ubuntu 26.04.1 LTS 64-bit VM. Verify actual release/architecture before claiming support. VM credentials have not been provided.
+- Ubuntu owns OS identity, terminal, kernel, repositories, drivers and security/package update mechanisms. SHAI maintains its software, configurations, containers and AI.
+- Installer locally inspects hardware/software, explains recommendations, offers default/recommended/optional choices and previews changes for approval before visible execution.
+- User requests suppressing routine notifications and disabling automatic update installation in the approved appliance configuration. Present package/security/firmware updates and app/container/runtime updates in SHAI, distinguish checking from installing, and preserve critical alerts. This supersedes the plan's older recommendation to preserve automatic-update settings by default.
+- AI selector and runtime run on Ubuntu host; offer No AI and reserve automation resources.
+- Application dashboard includes installed/available/install/remove/update views.
+- Debloat after inspecting the full installation and dependency impacts. Preserve working login, desktop, networking, terminal, security and recovery.
+- User wants simple Home Assistant deployment. Recommended design is one managed Compose stack with separate service containers and a shared private network. One actual all-services container was proposed by the user; the distinction remains unresolved and must be settled before backend implementation.
+- No shared shai/shai credentials or silent conversion of the development host.
+- New branding goes under branding/assets. Original reference art stays unchanged.

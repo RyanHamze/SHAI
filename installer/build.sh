@@ -3,7 +3,7 @@ set -Eeuo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 readonly ROOT
-readonly VERSION="0.1.2"
+readonly VERSION="0.3.2"
 readonly PACKAGE="shai-installer_${VERSION}_amd64"
 BUILD_ROOT="$(mktemp -d "/tmp/shai-installer-build-${VERSION}.XXXXXX")"
 readonly BUILD_ROOT
@@ -23,11 +23,26 @@ install -d \
     "$STAGE/usr/bin" \
     "$STAGE/usr/lib/shai-installer/catalog" \
     "$STAGE/usr/lib/shai-installer/assets" \
+    "$STAGE/usr/lib/shai-installer/assets/launchers" \
+    "$STAGE/usr/share/applications" \
     "$STAGE/usr/share/doc/shai-installer" \
+    "$STAGE/usr/share/icons/hicolor/scalable/apps" \
+    "$STAGE/usr/share/icons/SHAI/scalable/apps" \
+    "$STAGE/usr/share/themes/SHAI/gnome-shell" \
+    "$STAGE/usr/share/themes/SHAI/gtk-4.0" \
+    "$STAGE/usr/share/backgrounds/shai" \
+    "$STAGE/usr/share/shai/branding" \
     "$DIST"
 
 install -m 0644 "$ROOT/installer/debian/control" "$STAGE/DEBIAN/control"
 install -m 0755 "$ROOT/installer/src/shai-installer" "$STAGE/usr/bin/shai-installer"
+install -m 0755 "$ROOT/installer/src/shai-setup" "$STAGE/usr/bin/shai-setup"
+install -m 0755 "$ROOT/installer/src/shai-wave-a-shell" "$STAGE/usr/bin/shai-wave-a-shell"
+install -m 0755 "$ROOT/installer/src/shai-theme-apply" "$STAGE/usr/bin/shai-theme-apply"
+install -m 0755 "$ROOT/installer/src/shai-theme-reset" "$STAGE/usr/bin/shai-theme-reset"
+install -m 0755 "$ROOT/installer/src/shai-theme-default" "$STAGE/usr/bin/shai-theme-default"
+install -m 0755 "$ROOT/installer/src/shai-appearance" "$STAGE/usr/bin/shai-appearance"
+install -m 0755 "$ROOT/installer/src/shai-plan-validator" "$STAGE/usr/lib/shai-installer/shai-plan-validator"
 install -m 0755 "$ROOT/tools/collect_debloat_benchmark.sh" "$STAGE/usr/lib/shai-installer/collect-debloat-benchmark"
 install -m 0755 "$ROOT/tools/configure_manual_updates.sh" "$STAGE/usr/lib/shai-installer/configure-manual-updates"
 install -m 0755 "$ROOT/tools/restore_automatic_updates.sh" "$STAGE/usr/lib/shai-installer/restore-automatic-updates"
@@ -54,8 +69,23 @@ install -m 0644 "$ROOT/connectivity/etc/dconf/db/local.d/20-shai-web-offline" "$
 install -m 0644 "$ROOT/connectivity/etc/dconf/profile/user" "$STAGE/usr/lib/shai-installer/assets/dconf-user-profile"
 install -m 0644 "$ROOT/connectivity/etc/firefox/policies/policies.json" "$STAGE/usr/lib/shai-installer/assets/firefox-policies.json"
 install -m 0644 "$ROOT/installer/README.md" "$STAGE/usr/share/doc/shai-installer/README.md"
+install -m 0644 "$ROOT/installer/SETUP_README.md" "$STAGE/usr/share/doc/shai-installer/SETUP_README.md"
+install -m 0644 "$ROOT/installer/share/applications/shai-setup.desktop" "$STAGE/usr/share/applications/shai-setup.desktop"
+for launcher in shai-home.desktop shai-shapp.desktop shai-health.desktop shai-aia.desktop shai-appearance.desktop; do
+    install -m 0644 "$ROOT/installer/share/applications/$launcher" "$STAGE/usr/lib/shai-installer/assets/launchers/$launcher"
+done
+install -m 0644 "$ROOT/branding/SHAI_Brand_v2/shai-lockup-dark.svg" "$STAGE/usr/share/shai/branding/shai-lockup-dark.svg"
+install -m 0644 "$ROOT/branding/SHAI_Brand_v2/shai-wordmark-dark.svg" "$STAGE/usr/share/shai/branding/shai-wordmark-dark.svg"
+install -m 0644 "$ROOT/branding/SHAI_Brand_v2/shai-welcome-1200x630.png" "$STAGE/usr/share/shai/branding/shai-welcome-1200x630.png"
+install -m 0644 "$ROOT/branding/theme/share/backgrounds/shai/shai-wallpaper-1920x1080.png" "$STAGE/usr/share/shai/branding/shai-wallpaper-1920x1080.png"
+install -m 0644 "$ROOT/branding/SHAI_Brand_v2/shai-lockup-dark.svg" "$STAGE/usr/share/icons/hicolor/scalable/apps/shai.svg"
+install -m 0644 "$ROOT/branding/theme/share/themes/SHAI/index.theme" "$STAGE/usr/share/themes/SHAI/index.theme"
+install -m 0644 "$ROOT/branding/theme/share/themes/SHAI/gnome-shell/gnome-shell.css" "$STAGE/usr/share/themes/SHAI/gnome-shell/gnome-shell.css"
+install -m 0644 "$ROOT/branding/theme/share/themes/SHAI/gtk-4.0/gtk.css" "$STAGE/usr/share/themes/SHAI/gtk-4.0/gtk.css"
+install -m 0644 "$ROOT/branding/theme/share/icons/SHAI/index.theme" "$STAGE/usr/share/icons/SHAI/index.theme"
+install -m 0644 "$ROOT/branding/theme/share/icons/SHAI/scalable/apps/"*.svg "$STAGE/usr/share/icons/SHAI/scalable/apps/"
+install -m 0644 "$ROOT/branding/theme/share/backgrounds/shai/"*.png "$STAGE/usr/share/backgrounds/shai/"
 
-find "$STAGE" -exec touch -h -d "@$SOURCE_DATE_EPOCH" {} +
 dpkg-deb --root-owner-group --build "$STAGE" "$DIST/$PACKAGE.deb"
 (cd "$DIST" && sha256sum "$PACKAGE.deb" > "$PACKAGE.deb.sha256")
 dpkg-deb --info "$DIST/$PACKAGE.deb"

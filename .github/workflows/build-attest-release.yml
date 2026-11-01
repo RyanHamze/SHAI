@@ -20,12 +20,22 @@ jobs:
       - name: Install build dependencies
         run: |
           apt-get update
-          DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends apt-utils bash ca-certificates coreutils dpkg-dev findutils git gzip python3 shellcheck tar util-linux
+          DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends apt-utils bash ca-certificates coreutils dpkg-dev findutils git gzip perl python3 shellcheck tar util-linux
       - name: Static analysis
-        run: shellcheck installer/src/shai-installer installer/build.sh release/*.sh tools/*.sh connectivity/bin/*
+        run: |
+          shellcheck \
+            installer/build.sh \
+            installer/src/shai-installer \
+            installer/src/shai-theme-apply \
+            installer/src/shai-theme-default \
+            installer/src/shai-theme-reset \
+            release/*.sh \
+            tests/*.sh \
+            tools/*.sh \
+            connectivity/bin/*
       - name: Build and test
         run: |
-          chmod +x installer/build.sh installer/src/shai-installer release/*.sh tests/*.sh tools/*.sh connectivity/bin/*
+          chmod +x installer/build.sh installer/src/* release/*.sh tests/*.sh tools/*.sh connectivity/bin/*
           tests/test-package.sh
       - name: Attest DEB provenance
         if: github.event_name != 'pull_request'

@@ -1,0 +1,18 @@
+/* SHAI GTK 4 / libadwaita colour overrides. Opt-in only: activate.sh --gtk copies this to ~/.config/gtk-4.0/gtk.css.
+ * Colours from branding/COLORS.md. Not yet tested on a running session. */
+@define-color accent_color #33EE33;
+@define-color accent_bg_color #33EE33;
+@define-color accent_fg_color #0B0F0C;
+@define-color window_bg_color #0B0F0C;
+@define-color window_fg_color #DDFBE0;
+@define-color view_bg_color #111812;
+@define-color view_fg_color #DDFBE0;
+@define-color headerbar_bg_color #111812;
+@define-color headerbar_fg_color #DDFBE0;
+@define-color card_bg_color #162019;
+@define-color card_fg_color #DDFBE0;
+@define-color popover_bg_color #162019;
+@define-color popover_fg_color #DDFBE0;
+@define-color destructive_bg_color #FF6B6B;
+@define-color destructive_fg_color #0B0F0C;
+@define-color borders #263A2B;

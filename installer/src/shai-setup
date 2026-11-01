@@ -1,0 +1,572 @@
+#!/usr/bin/env python3
+"""SHAI Setup graphical planner."""
+
+from __future__ import annotations
+
+import json
+import os
+import platform
+import shlex
+import shutil
+import subprocess
+import sys
+import uuid
+from pathlib import Path
+
+import gi
+
+gi.require_version("Gtk", "4.0")
+gi.require_version("Gdk", "4.0")
+from gi.repository import Gdk, Gio, GLib, Gtk  # noqa: E402
+
+
+APP_ID = "com.aabey.shai.Setup"
+BRAND_DIR = Path(os.environ.get("SHAI_BRAND_DIR", "/usr/share/shai/branding"))
+README = Path(
+    os.environ.get("SHAI_SETUP_README", "/usr/share/doc/shai-installer/SETUP_README.md")
+)
+RESULT = Path(
+    os.environ.get("SHAI_SETUP_RESULT", "/var/lib/shai-installer/setup-result.json")
+)
+GREEN = "#33EE33"
+
+CSS = b"""
+window { background: #0B0F0C; color: #DDFBE0; }
+.setup-shell { background: #0B0F0C; }
+.brand-header { background: #0B0F0C; border-bottom: 1px solid #263A2B; padding: 14px 22px; }
+.step-rail { background: #111812; border-right: 1px solid #263A2B; padding: 22px 16px; }
+.step { color: #93A89A; padding: 9px 10px; }
+.step-active { color: #33EE33; background: #162019; border-radius: 4px; padding: 9px 10px; font-weight: 700; }
+.page { padding: 28px 34px; }
+.page-title { color: #DDFBE0; font-size: 24px; font-weight: 700; }
+.page-copy { color: #A7B7AA; font-size: 14px; }
+.section-title { color: #8DF28D; font-size: 16px; font-weight: 700; margin-top: 12px; }
+.choice { background: #111812; border: 1px solid #354837; border-radius: 6px; padding: 14px; }
+.choice:checked { border-color: #33EE33; }
+.warning { background: #241F10; border: 1px solid #8F7628; border-radius: 5px; padding: 13px; color: #FFE49A; }
+.status { background: #111812; border: 1px solid #263A2B; border-radius: 5px; padding: 14px; }
+.footer { background: #111812; border-top: 1px solid #263A2B; padding: 12px 20px; }
+button { background: #162019; color: #DDFBE0; border: 1px solid #354837; border-radius: 4px; padding: 9px 18px; }
+button:hover { border-color: #8DF28D; }
+button.suggested-action { background: #33EE33; color: #071008; border-color: #33EE33; font-weight: 700; }
+button.destructive-action { background: #331919; color: #FFDADA; border-color: #8D3C3C; }
+button.sponsor-link { background: transparent; color: #8DF28D; border: 0; padding: 5px; }
+textview, textview text { background: #111812; color: #DDFBE0; }
+textview { border: 1px solid #263A2B; border-radius: 4px; }
+checkbutton, switch { color: #DDFBE0; }
+"""
+
+
+def label(text: str, css: str | None = None, wrap: bool = True) -> Gtk.Label:
+    widget = Gtk.Label(label=text, xalign=0)
+    widget.set_wrap(wrap)
+    widget.set_selectable(False)
+    if css:
+        widget.add_css_class(css)
+    return widget
+
+
+def hardware_summary() -> str:
+    os_name = "Ubuntu"
+    try:
+        values = {}
+        for line in Path("/etc/os-release").read_text(encoding="utf-8").splitlines():
+            if "=" in line:
+                key, value = line.split("=", 1)
+                values[key] = value.strip('"')
+        os_name = values.get("PRETTY_NAME", os_name)
+    except OSError:
+        pass
+    ram_gb = 0.0
+    try:
+        memory = next(
+            line for line in Path("/proc/meminfo").read_text().splitlines()
+            if line.startswith("MemTotal:")
+        )
+        ram_gb = int(memory.split()[1]) / 1024 / 1024
+    except (OSError, StopIteration, ValueError):
+        pass
+    free_gb = shutil.disk_usage("/").free / (1024 ** 3)
+    return (
+        f"{os_name} | {platform.machine()} | {os.cpu_count() or 1} CPU threads | "
+        f"{ram_gb:.1f} GB RAM | {free_gb:.1f} GB free"
+    )
+
+
+class SetupWindow(Gtk.ApplicationWindow):
+    STEPS = ("Debloat", "Architecture", "Purpose", "Review", "Apply", "Complete")
+
+    def __init__(self, app: Gtk.Application) -> None:
+        super().__init__(application=app, title="SHAI Setup")
+        self.set_default_size(1040, 720)
+        self.set_size_request(780, 600)
+        self.index = 0
+        self.plan_id = ""
+        self.poll_count = 0
+        self.shells_opened = False
+        self.home_process: subprocess.Popen | None = None
+
+        shell = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+        shell.add_css_class("setup-shell")
+        self.set_child(shell)
+        shell.append(self.build_header())
+
+        body = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL)
+        body.set_vexpand(True)
+        shell.append(body)
+        self.rail = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
+        self.rail.set_size_request(190, -1)
+        self.rail.add_css_class("step-rail")
+        body.append(self.rail)
+        self.step_labels = []
+        for number, name in enumerate(self.STEPS, 1):
+            item = label(f"{number}.  {name}", "step", False)
+            self.step_labels.append(item)
+            self.rail.append(item)
+
+        self.stack = Gtk.Stack()
+        self.stack.set_hexpand(True)
+        self.stack.set_vexpand(True)
+        self.stack.set_transition_type(Gtk.StackTransitionType.CROSSFADE)
+        body.append(self.stack)
+
+        self.stack.add_named(self.build_debloat_page(), "debloat")
+        self.stack.add_named(self.build_architecture_page(), "architecture")
+        self.stack.add_named(self.build_purpose_page(), "purpose")
+        self.stack.add_named(self.build_review_page(), "review")
+        self.stack.add_named(self.build_apply_page(), "apply")
+        self.stack.add_named(self.build_complete_page(), "complete")
+
+        shell.append(self.build_footer())
+        self.show_step(0)
+
+    def build_header(self) -> Gtk.Widget:
+        header = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=16)
+        header.add_css_class("brand-header")
+        lockup = BRAND_DIR / "shai-lockup-dark.svg"
+        if lockup.exists():
+            picture = Gtk.Picture.new_for_filename(str(lockup))
+            picture.set_content_fit(Gtk.ContentFit.CONTAIN)
+            picture.set_size_request(360, 64)
+            picture.set_halign(Gtk.Align.START)
+            header.append(picture)
+        else:
+            header.append(label("SHAI", "page-title", False))
+        spacer = Gtk.Box()
+        spacer.set_hexpand(True)
+        header.append(spacer)
+        sponsor = Gtk.LinkButton.new_with_label(
+            "https://aabeyllc.com", "Brought to you by Aabey LLC"
+        )
+        sponsor.add_css_class("sponsor-link")
+        sponsor.set_halign(Gtk.Align.END)
+        header.append(sponsor)
+        return header
+
+    def page(self) -> tuple[Gtk.ScrolledWindow, Gtk.Box]:
+        content = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=16)
+        content.add_css_class("page")
+        content.set_valign(Gtk.Align.START)
+        scroll = Gtk.ScrolledWindow()
+        scroll.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+        scroll.set_child(content)
+        return scroll, content
+
+    def build_debloat_page(self) -> Gtk.Widget:
+        scroll, page = self.page()
+        page.append(label("Begin with a lighter Ubuntu", "page-title"))
+        page.append(label(
+            "SHAI Setup starts by applying the exact debloat profile already tested on "
+            "Ubuntu 26.04. You can stop here and read the complete scope before deciding.",
+            "page-copy",
+        ))
+        warning = label(
+            "Personal files and media are not targeted. SHAI does not scan or remove files "
+            "from your home folder, media folders, or mounted data drives. It removes only "
+            "named applications and settings shown in the setup README. Removing the SHAI "
+            "package later cannot automatically reinstall removed Ubuntu applications.",
+            "warning",
+        )
+        page.append(warning)
+        page.append(label("Things SHAI may remove", "section-title"))
+        page.append(label(
+            "Selected office, game, media-player, printer/scanner/modem, domain-login, "
+            "remote-desktop, reporting, help, extra dictionary, theme-variant, and personal "
+            "utility packages.",
+        ))
+        page.append(label("Things that stay", "section-title"))
+        page.append(label(
+            "Ubuntu login, GNOME, networking, Firefox, Terminal, package tools, accessibility, "
+            "SSH package files, Snap, PackageKit, drivers, firmware tools, kernels, and your "
+            "personal files and media.",
+        ))
+        self.debloat_confirm = Gtk.CheckButton(
+            label="I want SHAI to debloat and repurpose this Ubuntu installation as a smart-home and AI automation hub."
+        )
+        self.debloat_confirm.connect("toggled", lambda *_: self.update_navigation())
+        page.append(self.debloat_confirm)
+        readme = Gtk.Button(label="Review the debloat README")
+        readme.connect("clicked", self.open_readme)
+        readme.set_halign(Gtk.Align.START)
+        page.append(readme)
+        return scroll
+
+    def build_architecture_page(self) -> Gtk.Widget:
+        scroll, page = self.page()
+        page.append(label("Choose the environment architecture", "page-title"))
+        page.append(label(
+            "This chooses how SHAPP will deploy compatible applications later. Setup records "
+            "the choice before local applications and tools are selected in SHAPP.",
+            "page-copy",
+        ))
+        self.direct_host = Gtk.CheckButton(
+            label="Install compatible apps directly in Ubuntu (simple)"
+        )
+        self.direct_host.set_active(True)
+        self.direct_host.add_css_class("choice")
+        page.append(self.direct_host)
+        page.append(label(
+            "The simplest option. SHAPP installs supported applications directly in Ubuntu. "
+            "Apps without a safe, audited Ubuntu installation method remain unavailable.",
+            "page-copy",
+        ))
+        self.managed_stack = Gtk.CheckButton(
+            label="Use one SHAI-managed Docker stack (advanced)"
+        )
+        self.managed_stack.set_group(self.direct_host)
+        self.managed_stack.add_css_class("choice")
+        page.append(self.managed_stack)
+        page.append(label(
+            "One Docker Engine and one managed stack. Each service still runs in its own "
+            "container so it can be updated, stopped, backed up, or removed independently.",
+            "page-copy",
+        ))
+        return scroll
+
+    def purpose_row(self, title: str, detail: str, active: bool) -> tuple[Gtk.Box, Gtk.Switch]:
+        row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=18)
+        row.add_css_class("choice")
+        copy = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
+        copy.set_hexpand(True)
+        copy.append(label(title, "section-title", False))
+        copy.append(label(detail, "page-copy"))
+        switch = Gtk.Switch()
+        switch.set_active(active)
+        switch.set_valign(Gtk.Align.CENTER)
+        row.append(copy)
+        row.append(switch)
+        return row, switch
+
+    def build_purpose_page(self) -> Gtk.Widget:
+        scroll, page = self.page()
+        page.append(label("What should SHAI prepare for?", "page-title"))
+        page.append(label(
+            "These choices shape SHAPP recommendations. They do not install the individual "
+            "applications in this setup wave.",
+            "page-copy",
+        ))
+        smart_row, self.smart_home = self.purpose_row(
+            "Smart-home automation",
+            "Prepare SHAPP to recommend Home Assistant and compatible MQTT, Zigbee, Z-Wave, "
+            "ESPHome, Matter, voice, and automation components.",
+            True,
+        )
+        page.append(smart_row)
+        ai_row, self.local_ai = self.purpose_row(
+            "Local AI",
+            "Install the AIA launcher and prepare hardware-aware recommendations. No runtime, "
+            "model weights, microphone access, or online model source is enabled during setup.",
+            False,
+        )
+        page.append(ai_row)
+        offline_row, self.offline_mode = self.purpose_row(
+            "Operate the environment offline by default",
+            "Keep web access disabled after setup. Local services remain available. Future "
+            "online downloads require a separate, visible approval.",
+            True,
+        )
+        page.append(offline_row)
+        page.append(label(
+            "Local apps and tools are selected later in SHAPP. Their resource, network, port, "
+            "storage, and download requirements are shown before installation.",
+            "warning",
+        ))
+        return scroll
+
+    def build_review_page(self) -> Gtk.Widget:
+        scroll, page = self.page()
+        page.append(label("Review SHAI Setup", "page-title"))
+        page.append(label(
+            "Nothing has changed yet. Apply opens a separate visible terminal and asks for "
+            "your sudo password before the protected engine begins.",
+            "page-copy",
+        ))
+        self.review = Gtk.TextView()
+        self.review.set_editable(False)
+        self.review.set_cursor_visible(False)
+        self.review.set_monospace(True)
+        self.review.set_vexpand(True)
+        self.review.set_size_request(-1, 330)
+        page.append(self.review)
+        page.append(label(
+            "SHAI may connect to the internet when approved files are required. Your offline "
+            "selection determines whether future SHAPP downloads are offered or kept paused. "
+            "Every online source and download is shown before it runs.",
+            "warning",
+        ))
+        return scroll
+
+    def build_apply_page(self) -> Gtk.Widget:
+        scroll, page = self.page()
+        page.append(label("Apply SHAI Setup", "page-title"))
+        page.append(label(
+            "Launching this step implements the changes you requested. SHAI opens a visible "
+            "terminal and asks for your sudo password before changing Ubuntu. Keep the terminal "
+            "open while it shows debloat, theme, launcher, policy, and final health-check work.",
+            "page-copy",
+        ))
+        self.apply_status = label("Ready to open the visible terminal.", "status")
+        page.append(self.apply_status)
+        self.apply_button = Gtk.Button(label="Apply in visible terminal")
+        self.apply_button.add_css_class("suggested-action")
+        self.apply_button.set_halign(Gtk.Align.START)
+        self.apply_button.connect("clicked", self.start_apply)
+        page.append(self.apply_button)
+        return scroll
+
+    def build_complete_page(self) -> Gtk.Widget:
+        scroll, page = self.page()
+        page.append(label("SHAI Setup is complete", "page-title"))
+        page.append(label(
+            "Ubuntu is still the operating system. SHAI's base profile, desktop theme, "
+            "architecture choice, and core launchers are now configured.",
+            "page-copy",
+        ))
+        self.complete_status = label("SHAI Home is opening.", "status")
+        page.append(self.complete_status)
+        page.append(label(
+            "SHAI Home shows the environment summary. Continue to SHAPP to select local apps "
+            "and tools when its catalog is available.",
+            "warning",
+        ))
+        open_shapp = Gtk.Button(label="Close SHAI Home and open SHAPP")
+        open_shapp.add_css_class("suggested-action")
+        open_shapp.set_halign(Gtk.Align.START)
+        open_shapp.connect("clicked", self.close_home_open_shapp)
+        page.append(open_shapp)
+        return scroll
+
+    def build_footer(self) -> Gtk.Widget:
+        footer = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
+        footer.add_css_class("footer")
+        self.back = Gtk.Button(label="Back")
+        self.back.connect("clicked", self.go_back)
+        footer.append(self.back)
+        self.cancel = Gtk.Button(label="Exit setup")
+        self.cancel.connect("clicked", lambda *_: self.close())
+        footer.append(self.cancel)
+        spacer = Gtk.Box()
+        spacer.set_hexpand(True)
+        footer.append(spacer)
+        self.next = Gtk.Button(label="Continue")
+        self.next.add_css_class("suggested-action")
+        self.next.connect("clicked", self.go_next)
+        footer.append(self.next)
+        return footer
+
+    def show_step(self, index: int) -> None:
+        self.index = max(0, min(index, len(self.STEPS) - 1))
+        self.stack.set_visible_child_name(
+            ("debloat", "architecture", "purpose", "review", "apply", "complete")[self.index]
+        )
+        for position, item in enumerate(self.step_labels):
+            item.remove_css_class("step-active")
+            item.remove_css_class("step")
+            item.add_css_class("step-active" if position == self.index else "step")
+        if self.index == 3:
+            self.refresh_review()
+        self.update_navigation()
+
+    def update_navigation(self) -> None:
+        self.back.set_sensitive(0 < self.index < 4)
+        self.next.set_visible(self.index < 4)
+        self.next.set_sensitive(self.index != 0 or self.debloat_confirm.get_active())
+        self.cancel.set_label("No, exit setup" if self.index == 0 else "Exit setup")
+        if self.index == 0:
+            self.next.set_label("Yes, continue")
+        elif self.index == 2:
+            self.next.set_label("Review and apply")
+        else:
+            self.next.set_label("Continue")
+
+    def go_back(self, _button: Gtk.Button) -> None:
+        self.show_step(self.index - 1)
+
+    def go_next(self, _button: Gtk.Button) -> None:
+        if self.index == 0 and not self.debloat_confirm.get_active():
+            return
+        self.show_step(self.index + 1)
+
+    def architecture(self) -> str:
+        return "managed-stack" if self.managed_stack.get_active() else "direct-host"
+
+    def refresh_review(self) -> None:
+        architecture = (
+            "One SHAI-managed Docker stack (advanced; Docker is installed only when required)"
+            if self.architecture() == "managed-stack"
+            else "Direct Ubuntu installation for apps with audited native support (simple)"
+        )
+        lines = [
+            "SHAI SETUP",
+            "==========",
+            "",
+            hardware_summary(),
+            "",
+            "1. Run the exact protected Ubuntu debloat profile.",
+            "2. Keep personal files and media outside the operation scope.",
+            "3. Apply the reversible SHAI wallpaper, GTK colors, icons, dark mode, and green accent.",
+            "   GNOME Shell styling activates when Ubuntu's optional User Themes extension is available.",
+            "4. Install SHAI Home, SHAPP, SHAI Health, and Web Offline launchers.",
+            f"5. Architecture: {architecture}.",
+            f"6. Smart-home intent: {'Yes' if self.smart_home.get_active() else 'No'}.",
+            f"7. Local-AI intent: {'Yes; install AIA launcher only' if self.local_ai.get_active() else 'No'}.",
+            f"8. Offline-by-default: {'Yes' if self.offline_mode.get_active() else 'No'}.",
+            "9. Save the choices for SHAPP and run final health checks.",
+            "10. Open SHAI Home, then continue to SHAPP.",
+        ]
+        self.review.get_buffer().set_text("\n".join(lines))
+
+    def open_readme(self, _button: Gtk.Button) -> None:
+        if README.exists():
+            Gio.AppInfo.launch_default_for_uri(README.as_uri(), None)
+        else:
+            self.show_message("README unavailable", str(README))
+
+    def plan(self) -> dict[str, object]:
+        return {
+            "schema": 1,
+            "plan_id": str(uuid.uuid4()),
+            "target_user": os.environ.get("USER", ""),
+            "confirmed_debloat": bool(self.debloat_confirm.get_active()),
+            "architecture": self.architecture(),
+            "smart_home": bool(self.smart_home.get_active()),
+            "local_ai": bool(self.local_ai.get_active()),
+            "offline_mode": bool(self.offline_mode.get_active()),
+            "theme": "shai-brand-v2",
+        }
+
+    def terminal_command(self, plan_path: Path) -> list[str] | None:
+        command = (
+            f"sudo /usr/bin/shai-installer --apply-plan {shlex.quote(str(plan_path))}; "
+            "rc=$?; echo; "
+            "if [ $rc -eq 0 ]; then echo 'SHAI Setup completed successfully.'; "
+            "else echo \"SHAI Setup stopped with exit code $rc.\"; fi; "
+            "echo 'This window will close in 5 seconds.'; sleep 5; exit $rc"
+        )
+        if shutil.which("ptyxis"):
+            return ["ptyxis", "--standalone", "--title", "SHAI Setup - Apply Changes", "--", "bash", "-lc", command]
+        if shutil.which("gnome-terminal"):
+            return ["gnome-terminal", "--wait", "--title=SHAI Setup - Apply Changes", "--", "bash", "-lc", command]
+        terminal = shutil.which("x-terminal-emulator")
+        if terminal:
+            return [terminal, "-e", "bash", "-lc", command]
+        return None
+
+    def start_apply(self, _button: Gtk.Button) -> None:
+        plan = self.plan()
+        self.plan_id = str(plan["plan_id"])
+        cache = Path.home() / ".cache" / "shai"
+        cache.mkdir(parents=True, exist_ok=True, mode=0o700)
+        plan_path = cache / f"wave-a-{self.plan_id}.json"
+        plan_path.write_text(json.dumps(plan, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+        plan_path.chmod(0o600)
+        command = self.terminal_command(plan_path)
+        if command is None:
+            self.show_message(
+                "Terminal unavailable",
+                "SHAI could not find Ptyxis, GNOME Terminal, or x-terminal-emulator.",
+            )
+            return
+        self.apply_button.set_sensitive(False)
+        self.apply_status.set_text(
+            "The terminal is open. Enter your sudo password there, then leave it open while SHAI applies and verifies your requested changes."
+        )
+        subprocess.Popen(command, start_new_session=True)
+        self.poll_count = 0
+        GLib.timeout_add_seconds(1, self.poll_result)
+
+    def poll_result(self) -> bool:
+        self.poll_count += 1
+        try:
+            result = json.loads(RESULT.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            result = {}
+        if result.get("plan_id") == self.plan_id:
+            if result.get("status") == "success":
+                self.apply_status.set_text("SHAI Setup passed all final health checks.")
+                self.show_step(5)
+                GLib.timeout_add(800, self.open_default_shells)
+            else:
+                self.apply_status.set_text(
+                    f"SHAI Setup stopped safely: {result.get('message', 'Review the terminal and installer log.')}"
+                )
+                self.apply_button.set_sensitive(True)
+            return False
+        if self.poll_count >= 3600:
+            self.apply_status.set_text("No completion record was received. Review the visible terminal and logs.")
+            self.apply_button.set_sensitive(True)
+            return False
+        return True
+
+    def open_default_shells(self) -> bool:
+        if self.shells_opened:
+            return False
+        self.shells_opened = True
+        self.home_process = self.launch_shell("home")
+        return False
+
+    @staticmethod
+    def launch_shell(mode: str) -> subprocess.Popen | None:
+        executable = shutil.which("shai-wave-a-shell")
+        if executable:
+            return subprocess.Popen([executable, mode], start_new_session=True)
+        return None
+
+    def close_home_open_shapp(self, _button: Gtk.Button) -> None:
+        if self.home_process and self.home_process.poll() is None:
+            self.home_process.terminate()
+        self.launch_shell("shapp")
+        self.close()
+
+    def show_message(self, title: str, body: str) -> None:
+        dialog = Gtk.AlertDialog(message=title, detail=body)
+        dialog.show(self)
+
+
+class SetupApplication(Gtk.Application):
+    def __init__(self) -> None:
+        super().__init__(application_id=APP_ID, flags=Gio.ApplicationFlags.DEFAULT_FLAGS)
+
+    def do_startup(self) -> None:
+        Gtk.Application.do_startup(self)
+        provider = Gtk.CssProvider()
+        provider.load_from_data(CSS)
+        display = Gdk.Display.get_default()
+        if display:
+            Gtk.StyleContext.add_provider_for_display(
+                display, provider, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION
+            )
+
+    def do_activate(self) -> None:
+        if os.geteuid() == 0:
+            raise SystemExit("Run shai-setup as your normal desktop user, without sudo.")
+        window = self.props.active_window or SetupWindow(self)
+        window.present()
+
+
+def main() -> int:
+    return SetupApplication().run(sys.argv)
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

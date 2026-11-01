@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=SHAI Appearance
+Comment=Switch between SHAI and Ubuntu desktop appearance
+Exec=shai-appearance
+Icon=shai-settings
+Terminal=false
+Categories=Settings;DesktopSettings;
+Keywords=SHAI;theme;appearance;wallpaper;accent;Ubuntu;
+StartupNotify=true
+X-GNOME-UsesNotifications=false

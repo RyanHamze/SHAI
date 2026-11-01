@@ -1,25 +1,43 @@
-# SHAI checkpoint-test installer
+# SHAI Setup Wave A installer
 
-This directory builds the first test-only SHAI installer package. It targets a
-fresh, fully installed Ubuntu Desktop 26.04 system on `amd64` and reproduces
-only configuration already validated on the disposable SHAI VM.
+This directory builds `shai-installer` 0.3.2 for a fresh, fully installed
+Ubuntu Desktop 26.04 system on `amd64`.
 
-Installing the package does not debloat or reconfigure Ubuntu. It installs the
-`shai-installer` command and its read-only catalogs. The transformation starts
-only when the user runs:
+Installing the DEB is inert. It installs the SHAI Setup GUI, exact debloat
+catalogs, protected execution engine, SHAI desktop theme assets, documentation, and
+Wave A application shells. It does not debloat Ubuntu or change desktop
+settings during package installation.
+
+Launch setup as the normal desktop user:
 
 ```bash
-sudo shai-installer
+shai-setup
 ```
 
-The command inventories the host, simulates every exact APT removal wave,
-rejects simulations that install packages or remove protected components,
-shows the proposal, and requires the user to type `APPLY`. It never runs
-`apt update`, downloads packages, or performs a broad `autoremove`.
+The graphical sequence is:
 
-This is not the finished SHAI product. It does not include Home Assistant,
-containers, local AI, the SHAI dashboard, branding, firewall enforcement, or
-the proposed post-audit Wave 11 removals.
+1. Review and explicitly approve the tested debloat scope.
+2. Choose one managed Docker stack or compatible direct Ubuntu installs.
+3. Choose smart-home intent and local-AI intent.
+4. Review the exact Wave A plan.
+5. Apply in a separate visible Ubuntu terminal using normal sudo authentication.
+6. Run health checks, apply the reversible SHAI desktop theme, save the architecture, then open
+   SHAI Home and SHAPP.
+
+Wave A does not install Docker, Home Assistant, MQTT, Zigbee, Z-Wave, ESPHome,
+Matter, Node-RED, media servers, voice tools, AI runtimes, or model weights.
+Those are selected later in SHAPP. The Wave A Home, SHAPP, Health, and AIA
+windows are honest handoff shells and do not pretend their later backends exist.
+
+The existing terminal assessment path remains available:
+
+```bash
+sudo shai-installer --assess --user "$USER"
+```
+
+The legacy checkpoint-test apply path remains for development VM regression
+tests. Normal Wave A application uses a strict user-owned JSON plan generated
+by `shai-setup` and validated again after sudo elevation.
 
 ## Build
 
@@ -27,20 +45,22 @@ the proposed post-audit Wave 11 removals.
 ./installer/build.sh
 ```
 
-The package and checksum are written to `dist/`. Build from the SHAI project
-root. The build is local and does not contact an online source.
+The package and checksum are written to `dist/`. The build is local and does
+not contact an online source.
 
-## Test workflow
+## Safety properties
 
-1. Revert the Hyper-V VM to the fresh, fully updated Ubuntu checkpoint.
-2. Copy the `.deb` to the VM.
-3. Install it with `sudo apt install ./shai-installer_0.1.2_amd64.deb`.
-4. Run `sudo shai-installer --assess` for a preview without changes.
-5. Run `sudo shai-installer --checkpoint "CHECKPOINT NAME"`, review the
-   simulation, then type `APPLY`.
-6. Reboot and inspect the desktop before accepting the checkpoint test.
+- no changes when the package is merely installed or Setup is merely opened;
+- no online checks or downloads in Wave A;
+- no broad package purge, broad autoremove, kernel removal, or disk operation;
+- authoritative APT simulation before each exact removal wave;
+- protected-package gate and no-install gate;
+- user-owned, mode-0600, strict-schema setup plan;
+- visible terminal execution and sudo prompt;
+- personal files and media are outside the operation target set;
+- final APT, DPKG, protected-package, and systemd health checks;
+- local evidence, logs, before/after manifests, and setup result record.
 
-The installer records the supplied checkpoint name and backs up policy files
-and user settings before changing them. The VM checkpoint remains the only
-complete rollback mechanism for this initial test. Removing
-the `.deb` cannot reinstall applications that the user approved for removal.
+The VM checkpoint remains the only complete rollback mechanism during current
+development testing. Removing the DEB cannot reinstall applications removed
+with approval.
