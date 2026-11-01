@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
-readonly SHAI_VERSION="0.3.4"
+readonly SHAI_VERSION="0.4.0"
 readonly LIB_DIR="/usr/lib/shai-installer"
 readonly STATE_DIR="/var/lib/shai-installer"
 readonly LOG_DIR="/var/log/shai-installer"
@@ -532,7 +532,10 @@ PY
     install -m 0644 "$LIB_DIR/assets/gnome-wellbeing-panel.desktop" \
         /usr/local/share/applications/gnome-wellbeing-panel.desktop
 
-    timedatectl set-ntp false
+    timedatectl set-ntp true
+    if command -v chronyc >/dev/null 2>&1; then
+        chronyc makestep
+    fi
     configure_terminal_theme
 }
 

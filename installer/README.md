@@ -1,6 +1,6 @@
 # SHAI Setup Wave A installer
 
-This directory builds `shai-installer` 0.3.4 for a fresh, fully installed
+This directory builds `shai-installer` 0.4.0 for a fresh, fully installed
 Ubuntu Desktop 26.04 system on `amd64`.
 
 Installing the DEB is inert. It installs the SHAI Setup GUI, exact debloat
@@ -65,3 +65,17 @@ timestamps so the same source produces the same DEB locally and in GitHub CI.
 The VM checkpoint remains the only complete rollback mechanism during current
 development testing. Removing the DEB cannot reinstall applications removed
 with approval.
+
+## SHAPP functional draft
+
+Version 0.4.0 replaces the SHAPP handoff shell with a functional GTK draft.
+Recommended and Optional tabs contain two audited catalog entries each. The
+Currently Installed tab discovers user-facing APT, Snap, and local desktop
+applications; protected Ubuntu/GNOME components are visible but locked.
+
+Checkboxes stage a cumulative desired state in the persistent right-hand cart.
+Apply writes a mode-0600 plan and opens a visible terminal. The privileged
+helper revalidates catalog IDs, plan ownership, visible installed applications,
+and protected-package simulations before one exact APT transaction and any
+approved Snap removals. It never runs broad autoremove. Ubuntu App Store only
+launches Ubuntu's existing store in another window.

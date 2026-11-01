@@ -49,8 +49,8 @@ reviewed package reinstall plan when complete rollback is required.
   and GNOME Wellbeing recording/reminders are disabled. Setup does not delete
   existing online-account credentials; SHAPP will later offer a separately
   simulated and approved component removal.
-- Automatic date and time synchronization is disabled. The user must maintain
-  an accurate clock manually or explicitly re-enable Ubuntu time synchronization.
+- Automatic date and time synchronization remains enabled so signed Ubuntu
+  repository metadata and security operations use an accurate clock.
   Setup repeats this warning in the completed-system summary.
 - The Web Offline toggle is installed. The user's Offline choice controls the
   mode left active after setup. Proxy-based Web Offline is not a host-wide

@@ -3,7 +3,7 @@ set -Eeuo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 readonly ROOT
-readonly VERSION="0.3.4"
+readonly VERSION="0.4.0"
 readonly PACKAGE="shai-installer_${VERSION}_amd64"
 BUILD_ROOT="$(mktemp -d "/tmp/shai-installer-build-${VERSION}.XXXXXX")"
 readonly BUILD_ROOT
@@ -37,6 +37,9 @@ install -d \
 install -m 0644 "$ROOT/installer/debian/control" "$STAGE/DEBIAN/control"
 install -m 0755 "$ROOT/installer/src/shai-installer" "$STAGE/usr/bin/shai-installer"
 install -m 0755 "$ROOT/installer/src/shai-setup" "$STAGE/usr/bin/shai-setup"
+install -m 0755 "$ROOT/installer/src/shai-shapp" "$STAGE/usr/bin/shai-shapp"
+install -m 0755 "$ROOT/installer/src/shai-shapp-apply" "$STAGE/usr/bin/shai-shapp-apply"
+install -m 0755 "$ROOT/installer/src/shai-shapp-log" "$STAGE/usr/lib/shai-installer/shai-shapp-log"
 install -m 0755 "$ROOT/installer/src/shai-wave-a-shell" "$STAGE/usr/bin/shai-wave-a-shell"
 install -m 0755 "$ROOT/installer/src/shai-theme-apply" "$STAGE/usr/bin/shai-theme-apply"
 install -m 0755 "$ROOT/installer/src/shai-theme-reset" "$STAGE/usr/bin/shai-theme-reset"
@@ -48,6 +51,7 @@ install -m 0755 "$ROOT/tools/collect_debloat_benchmark.sh" "$STAGE/usr/lib/shai-
 install -m 0755 "$ROOT/tools/configure_manual_updates.sh" "$STAGE/usr/lib/shai-installer/configure-manual-updates"
 install -m 0755 "$ROOT/tools/restore_automatic_updates.sh" "$STAGE/usr/lib/shai-installer/restore-automatic-updates"
 install -m 0644 "$ROOT/debloat/PROTECTED_PACKAGES.regex" "$STAGE/usr/lib/shai-installer/PROTECTED_PACKAGES.regex"
+install -m 0644 "$ROOT/installer/catalog/shapp-apps.json" "$STAGE/usr/lib/shai-installer/catalog/shapp-apps.json"
 
 for file in \
     01-applications.list \

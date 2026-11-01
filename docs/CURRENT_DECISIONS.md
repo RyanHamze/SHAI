@@ -1,6 +1,6 @@
 # Current decisions
 
-Updated 2026-10-30; these supersede conflicting October 24 plan details.
+Updated 2026-11-01; these supersede conflicting October 24 plan details.
 
 - Claude involvement is stopped at Ryan's request after hitting its usage limit. Rebranding is deferred. Preserve received research/reference assets, but do not assign further Claude work or require artwork completion before installer work.
 
@@ -9,10 +9,12 @@ Updated 2026-10-30; these supersede conflicting October 24 plan details.
 - Name is SHAI, Smart Home Automation and AI; not an OS or shell.
 - Target test installation: full Ubuntu 26.04.1 LTS 64-bit VM. Verify actual release/architecture before claiming support. VM credentials have not been provided.
 - Ubuntu owns OS identity, terminal, kernel, repositories, drivers and security/package update mechanisms. SHAI maintains its software, configurations, containers and AI.
+- Keep Ubuntu automatic date and time synchronization enabled. Setup may perform the one-time correction, but normal SHAPP Apply operations must not force synchronization or change time settings. This is separate from the manual software-update policy.
 - Installer locally inspects hardware/software, explains recommendations, offers default/recommended/optional choices and previews changes for approval before visible execution.
 - User requests suppressing routine notifications and disabling automatic update installation in the approved appliance configuration. Present package/security/firmware updates and app/container/runtime updates in SHAI, distinguish checking from installing, and preserve critical alerts. This supersedes the plan's older recommendation to preserve automatic-update settings by default.
 - AI selector and runtime run on Ubuntu host; offer No AI and reserve automation resources.
 - Application dashboard includes installed/available/install/remove/update views.
+- SHAPP includes an Architecture tab. Setup seeds `direct-host` or `managed-stack`; a SHAPP override affects future installs only and never silently installs Docker or migrates existing services. An app is selectable only when the active architecture has a validated install and uninstall backend.
 - Debloat after inspecting the full installation and dependency impacts. Preserve working login, desktop, networking, terminal, security and recovery.
 - User wants simple Home Assistant deployment. Recommended design is one managed Compose stack with separate service containers and a shared private network. One actual all-services container was proposed by the user; the distinction remains unresolved and must be settled before backend implementation.
 - No shared shai/shai credentials or silent conversion of the development host.

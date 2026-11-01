@@ -3,7 +3,7 @@ set -Eeuo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 readonly ROOT
-readonly PACKAGE="${1:-$ROOT/dist/shai-installer_0.3.4_amd64.deb}"
+readonly PACKAGE="${1:-$ROOT/dist/shai-installer_0.4.0_amd64.deb}"
 TEST_DIR="$(mktemp -d /tmp/shai-wave-a-package-test.XXXXXX)"
 readonly TEST_DIR
 USER_NAME="$(id -un)"
@@ -19,10 +19,31 @@ bash -n \
     "$ROOT/installer/src/shai-theme-default"
 python3 -m py_compile \
     "$ROOT/installer/src/shai-setup" \
+    "$ROOT/installer/src/shai-shapp" \
+    "$ROOT/installer/src/shai-shapp-apply" \
+    "$ROOT/installer/src/shai-shapp-log" \
     "$ROOT/installer/src/shai-wave-a-shell" \
     "$ROOT/installer/src/shai-appearance" \
     "$ROOT/installer/src/shai-plan-validator" \
     "$ROOT/installer/src/shai-system-summary"
+python3 - "$ROOT/installer/catalog/shapp-apps.json" <<'PY'
+import json
+import pathlib
+import sys
+
+data = json.loads(pathlib.Path(sys.argv[1]).read_text(encoding="utf-8"))
+apps = data["apps"]
+ids = {item["id"] for item in apps}
+assert data["schema"] == 2
+assert len(apps) == 30
+assert sum(item["category"] == "recommended" for item in apps) == 11
+assert sum(item["category"] == "optional" for item in apps) == 19
+assert len(ids) == len(apps)
+assert {"sniffnet", "home-assistant", "mosquitto", "zigbee2mqtt", "whisper", "jellyfin",
+        "keepassxc", "opensnitch", "suricata"} <= ids
+assert all(item["packages"] for item in apps if item["available"])
+assert all(not item["packages"] for item in apps if not item["available"])
+PY
 
 python3 - "$ROOT/installer/src/shai-installer" <<'PY'
 import pathlib
@@ -104,14 +125,28 @@ dpkg-deb --extract "$PACKAGE" "$TEST_DIR/root"
 bash -n "$TEST_DIR/root/usr/bin/shai-installer"
 python3 -m py_compile \
     "$TEST_DIR/root/usr/bin/shai-setup" \
+    "$TEST_DIR/root/usr/bin/shai-shapp" \
+    "$TEST_DIR/root/usr/bin/shai-shapp-apply" \
+    "$TEST_DIR/root/usr/lib/shai-installer/shai-shapp-log" \
     "$TEST_DIR/root/usr/bin/shai-wave-a-shell" \
     "$TEST_DIR/root/usr/bin/shai-appearance" \
     "$TEST_DIR/root/usr/lib/shai-installer/shai-plan-validator" \
     "$TEST_DIR/root/usr/lib/shai-installer/shai-system-summary"
 
+mkdir -p "$TEST_DIR/log-home"
+HOME="$TEST_DIR/log-home" \
+    "$TEST_DIR/root/usr/lib/shai-installer/shai-shapp-log" \
+    DISCOVERED apt test-package "Test application" \
+    >/dev/null
+grep -Fq $'DISCOVERED\tapt\ttest-package\tTest application' \
+    "$TEST_DIR/log-home/.local/state/shai/shapp/logs/$(date +%F).log"
+
 for path in \
     usr/bin/shai-installer \
     usr/bin/shai-setup \
+    usr/bin/shai-shapp \
+    usr/bin/shai-shapp-apply \
+    usr/lib/shai-installer/shai-shapp-log \
     usr/bin/shai-wave-a-shell \
     usr/bin/shai-theme-apply \
     usr/bin/shai-theme-reset \
@@ -119,6 +154,7 @@ for path in \
     usr/bin/shai-appearance \
     usr/lib/shai-installer/shai-plan-validator \
     usr/lib/shai-installer/shai-system-summary \
+    usr/lib/shai-installer/catalog/shapp-apps.json \
     usr/lib/shai-installer/assets/30-shai-privacy \
     usr/lib/shai-installer/assets/gnome-wellbeing-panel.desktop \
     usr/lib/shai-installer/assets/shai.palette \
@@ -188,12 +224,41 @@ grep -Fq 'Foreground=#33EE33' \
     "$TEST_DIR/root/usr/lib/shai-installer/assets/shai.palette"
 grep -Fq 'Background=#000000' \
     "$TEST_DIR/root/usr/lib/shai-installer/assets/shai.palette"
-grep -Fq 'timedatectl set-ntp false' \
+grep -Fq 'timedatectl set-ntp true' \
     "$TEST_DIR/root/usr/bin/shai-installer"
 grep -Fq 'flatpak permission-remove location location' \
     "$TEST_DIR/root/usr/bin/shai-installer"
 grep -Fq 'Automatic date and time' \
     "$TEST_DIR/root/usr/lib/shai-installer/shai-system-summary"
+grep -Fq 'Exec=shai-shapp' \
+    "$TEST_DIR/root/usr/lib/shai-installer/assets/launchers/shai-shapp.desktop"
+grep -Fq 'CART_WIDTH = 320' \
+    "$TEST_DIR/root/usr/bin/shai-shapp"
+grep -Fq 'MB runtime RAM' \
+    "$TEST_DIR/root/usr/bin/shai-shapp"
+grep -Fq 'ram -= amount' \
+    "$TEST_DIR/root/usr/bin/shai-shapp"
+grep -Fq 'window-close-symbolic' \
+    "$TEST_DIR/root/usr/bin/shai-shapp"
+grep -Fq 'Open daily log folder' \
+    "$TEST_DIR/root/usr/bin/shai-shapp"
+grep -Fq 'catalog item has no enabled installer backend' \
+    "$TEST_DIR/root/usr/bin/shai-shapp-apply"
+grep -Fq 'Capacity exceeded; remove a selection' \
+    "$TEST_DIR/root/usr/bin/shai-shapp"
+grep -Fq 'Cannot fit:' \
+    "$TEST_DIR/root/usr/bin/shai-shapp"
+grep -Fq '0 pending changes' \
+    "$TEST_DIR/root/usr/bin/shai-shapp"
+grep -Fq 'snap-store.show-updates' \
+    "$TEST_DIR/root/usr/bin/shai-shapp"
+grep -Fq 'Application architecture' \
+    "$TEST_DIR/root/usr/bin/shai-shapp"
+if grep -Eq 'chronyc|prepare_clock_for_online_install|timedatectl' \
+    "$TEST_DIR/root/usr/bin/shai-shapp-apply"; then
+    printf 'SHAPP apply must not alter or force system time synchronization.\n' >&2
+    exit 1
+fi
 
 (cd "$(dirname "$PACKAGE")" && sha256sum -c "$(basename "$PACKAGE").sha256")
 printf 'SHAI Setup package tests passed. Evidence: %s\n' "$TEST_DIR"

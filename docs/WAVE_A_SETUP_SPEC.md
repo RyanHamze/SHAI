@@ -9,7 +9,7 @@ Status: implementation specification
   providers without deleting stored account credentials.
 - Leave media sharing off, clear existing app location grants, disable location,
   and hide/disable Wellbeing recording, limits, and reminders.
-- Disable automatic date and time and repeat that fact in the final summary.
+- Keep automatic date and time enabled and report its actual state in the final summary.
 - Protect Ubuntu/GNOME input, keyboard, color, accessibility, Appearance,
   desktop, power, sound, and display packages from SHAI removal.
 - Install the SHAI Matrix terminal palette with black background and `#33EE33`

@@ -1,0 +1,269 @@
+#!/usr/bin/env python3
+"""Validate and apply an explicitly approved SHAPP package plan."""
+
+from __future__ import annotations
+
+import datetime as dt
+import json
+import os
+import pwd
+import re
+import stat
+import subprocess
+import sys
+from pathlib import Path
+
+
+LIB = Path("/usr/lib/shai-installer")
+CATALOG = LIB / "catalog/shapp-apps.json"
+PROTECTED = LIB / "PROTECTED_PACKAGES.regex"
+LOGGER = LIB / "shai-shapp-log"
+STATE = Path("/var/lib/shai-installer")
+PACKAGE_RE = re.compile(r"^[a-z0-9][a-z0-9+.-]{0,127}(?::[a-z0-9]+)?$")
+PLAN_RE = re.compile(r"^[a-f0-9-]{16,64}$")
+USER_RE = re.compile(r"^[a-z_][a-z0-9_-]{0,31}$")
+PROTECTED_SNAPS = {"firefox", "snap-store", "firmware-updater", "desktop-security-center"}
+
+
+class PlanRejected(Exception):
+    """Raised when an untrusted SHAPP plan fails validation."""
+
+
+def fail(message: str) -> "NoReturn":
+    raise PlanRejected(message)
+
+
+def run(args: list[str], *, capture: bool = False) -> subprocess.CompletedProcess[str]:
+    print("+", " ".join(args), flush=True)
+    return subprocess.run(
+        args,
+        check=True,
+        text=True,
+        stdout=subprocess.PIPE if capture else None,
+    )
+
+
+def read_secure_plan(path: str) -> tuple[dict[str, object], os.stat_result]:
+    flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
+    try:
+        descriptor = os.open(path, flags)
+    except OSError as exc:
+        fail(f"cannot securely open plan: {exc}")
+    info = os.fstat(descriptor)
+    if not stat.S_ISREG(info.st_mode):
+        os.close(descriptor)
+        fail("plan must be a regular file")
+    if info.st_mode & (stat.S_IWGRP | stat.S_IWOTH):
+        os.close(descriptor)
+        fail("plan must not be writable by group or other users")
+    try:
+        with os.fdopen(descriptor, "r", encoding="utf-8") as stream:
+            data = json.load(stream)
+    except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+        fail(f"cannot read plan: {exc}")
+    if not isinstance(data, dict):
+        fail("plan must be a JSON object")
+    return data, info
+
+
+def load_catalog() -> dict[str, dict[str, object]]:
+    data = json.loads(CATALOG.read_text(encoding="utf-8"))
+    return {item["id"]: item for item in data["apps"]}
+
+
+def protected_patterns() -> list[re.Pattern[str]]:
+    patterns = []
+    for line in PROTECTED.read_text(encoding="utf-8").splitlines():
+        if line and not line.startswith("#"):
+            patterns.append(re.compile(line))
+    return patterns
+
+
+def is_protected(package: str, patterns: list[re.Pattern[str]]) -> bool:
+    normalized = package.split(":", 1)[0]
+    return normalized == "shai-installer" or any(pattern.search(normalized) for pattern in patterns)
+
+
+def visible_apt_packages() -> set[str]:
+    packages: set[str] = set()
+    for directory in (Path("/usr/share/applications"), Path("/usr/local/share/applications")):
+        if not directory.is_dir():
+            continue
+        for desktop in directory.glob("*.desktop"):
+            owner = subprocess.run(
+                ["dpkg-query", "-S", str(desktop)],
+                check=False,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.DEVNULL,
+            ).stdout.splitlines()
+            for line in owner:
+                if ": " in line:
+                    packages.add(line.split(": ", 1)[0].split(":", 1)[0])
+    return packages
+
+
+def installed_snaps() -> set[str]:
+    result = subprocess.run(
+        ["snap", "list"], check=False, text=True, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL
+    )
+    return {line.split()[0] for line in result.stdout.splitlines()[1:] if line.split()}
+
+
+def audit(user: str, action: str, source: str, item: str, detail: str) -> None:
+    subprocess.run(
+        [str(LOGGER), "--user", user, action, source, item, detail],
+        check=False,
+    )
+
+
+def user_log_paths(account: pwd.struct_passwd) -> tuple[str, str]:
+    directory = Path(account.pw_dir) / ".local/state/shai/shapp/logs"
+    return str(directory), str(directory / f"{dt.date.today().isoformat()}.log")
+
+
+def write_result(
+    plan_id: str,
+    status: str,
+    message: str,
+    account: pwd.struct_passwd | None = None,
+) -> None:
+    STATE.mkdir(parents=True, exist_ok=True)
+    destination = STATE / "shapp-result.json"
+    temporary = destination.with_suffix(".tmp")
+    payload = {"plan_id": plan_id, "status": status, "message": message}
+    if account is not None:
+        payload["log_dir"], payload["log_file"] = user_log_paths(account)
+    temporary.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+    temporary.chmod(0o644)
+    temporary.replace(destination)
+
+
+def main() -> int:
+    if os.geteuid() != 0:
+        fail("run through the visible sudo terminal opened by SHAPP")
+    if len(sys.argv) != 2:
+        fail("usage: shai-shapp-apply PLAN.json")
+    data, info = read_secure_plan(sys.argv[1])
+    expected = {
+        "schema", "plan_id", "target_user", "architecture",
+        "install", "remove_apt", "remove_snap",
+    }
+    if set(data) != expected or data.get("schema") != 2:
+        fail("unexpected plan schema or fields")
+    plan_id = data.get("plan_id")
+    user = data.get("target_user")
+    if not isinstance(plan_id, str) or not PLAN_RE.fullmatch(plan_id):
+        fail("invalid plan ID")
+    if not isinstance(user, str) or not USER_RE.fullmatch(user):
+        fail("invalid target user")
+    architecture = data.get("architecture")
+    if architecture not in {"direct-host", "managed-stack"}:
+        fail("invalid SHAPP architecture")
+    try:
+        account = pwd.getpwnam(user)
+    except KeyError:
+        fail("target user does not exist")
+    if info.st_uid != account.pw_uid:
+        fail("plan owner does not match target user")
+    for field in ("install", "remove_apt", "remove_snap"):
+        value = data.get(field)
+        if not isinstance(value, list) or any(not isinstance(item, str) for item in value):
+            fail(f"{field} must be a list of strings")
+        if len(value) != len(set(value)) or len(value) > 200:
+            fail(f"{field} contains duplicates or too many entries")
+
+    catalog = load_catalog()
+    install_ids = data["install"]
+    unknown = sorted(set(install_ids) - set(catalog))
+    if unknown:
+        fail(f"unknown catalog item: {', '.join(unknown)}")
+    install_packages = sorted({
+        package
+        for item_id in install_ids
+        for package in catalog[item_id]["packages"]
+    })
+    unavailable = sorted(
+        item_id for item_id in install_ids
+        if not catalog[item_id].get("available", True) or not catalog[item_id]["packages"]
+    )
+    if unavailable:
+        fail(f"catalog item has no enabled installer backend: {', '.join(unavailable)}")
+    catalog_packages = {
+        package for item in catalog.values() for package in item["packages"]
+    }
+    remove_apt = sorted(data["remove_apt"])
+    remove_snap = sorted(data["remove_snap"])
+    for package in install_packages + remove_apt + remove_snap:
+        if not PACKAGE_RE.fullmatch(package):
+            fail(f"invalid package name: {package}")
+
+    patterns = protected_patterns()
+    visible = visible_apt_packages()
+    for package in remove_apt:
+        if package not in visible and package not in catalog_packages:
+            fail(f"APT package is not a visible installed application: {package}")
+        if is_protected(package, patterns):
+            fail(f"protected Ubuntu component cannot be removed: {package}")
+    snaps = installed_snaps()
+    for package in remove_snap:
+        if package not in snaps:
+            fail(f"Snap is not installed: {package}")
+        if package in PROTECTED_SNAPS:
+            fail(f"protected Ubuntu Snap cannot be removed: {package}")
+
+    specs = [*install_packages, *(f"{package}-" for package in remove_apt)]
+    audit(
+        user,
+        "PLAN",
+        "shapp",
+        plan_id,
+        f"architecture={architecture}; install={','.join(install_packages) or '-'}; "
+        f"remove_apt={','.join(remove_apt) or '-'}; remove_snap={','.join(remove_snap) or '-'}",
+    )
+    try:
+        if install_packages:
+            run(["apt-get", "update"])
+        if specs:
+            simulation = run(["apt-get", "-s", "install", "--", *specs], capture=True).stdout
+            print(simulation)
+            removed = [
+                line.split()[1].split(":", 1)[0]
+                for line in simulation.splitlines()
+                if line.startswith(("Remv ", "Purg ")) and len(line.split()) > 1
+            ]
+            blocked = sorted({package for package in removed if is_protected(package, patterns)})
+            if blocked:
+                fail(f"APT simulation would remove protected components: {', '.join(blocked)}")
+            run(["apt-get", "-y", "install", "--", *specs])
+            for package in install_packages:
+                audit(user, "INSTALLED", "apt", package, f"approved SHAPP plan {plan_id}")
+            for package in remove_apt:
+                audit(user, "UNINSTALLED", "apt", package, f"approved SHAPP plan {plan_id}")
+        for package in remove_snap:
+            run(["snap", "remove", package])
+            audit(user, "UNINSTALLED", "snap", package, f"approved SHAPP plan {plan_id}")
+    except (subprocess.CalledProcessError, OSError, PlanRejected) as exc:
+        audit(user, "FAILED", "shapp", plan_id, str(exc))
+        write_result(plan_id, "failure", f"Package operation stopped: {exc}", account)
+        raise
+    audit(user, "COMPLETED", "shapp", plan_id, "All selected package changes completed")
+    write_result(plan_id, "success", "All selected package changes completed.", account)
+    print("\nSHAPP changes completed successfully.")
+    return 0
+
+
+if __name__ == "__main__":
+    try:
+        raise SystemExit(main())
+    except PlanRejected as exc:
+        message = f"SHAPP plan rejected: {exc}"
+        print(message, file=sys.stderr)
+        try:
+            raw = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
+            rejected_id = raw.get("plan_id", "")
+            if isinstance(rejected_id, str) and PLAN_RE.fullmatch(rejected_id):
+                write_result(rejected_id, "failure", message)
+        except (IndexError, OSError, UnicodeError, json.JSONDecodeError, AttributeError):
+            pass
+        raise SystemExit(2)

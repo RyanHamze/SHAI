@@ -1,0 +1,49 @@
+#!/usr/bin/env python3
+"""Append one sanitized SHAPP event to the desktop user's daily log."""
+
+from __future__ import annotations
+
+import argparse
+import datetime as dt
+import os
+import pwd
+import subprocess
+import sys
+from pathlib import Path
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--user")
+    parser.add_argument("action")
+    parser.add_argument("source")
+    parser.add_argument("item")
+    parser.add_argument("detail")
+    args = parser.parse_args()
+
+    if os.geteuid() == 0:
+        if not args.user:
+            raise SystemExit("root must provide --user")
+        account = pwd.getpwnam(args.user)
+        command = [
+            "runuser", "-u", account.pw_name, "--", sys.executable, __file__,
+            args.action, args.source, args.item, args.detail,
+        ]
+        return subprocess.run(command, check=False).returncode
+    if args.user:
+        raise SystemExit("--user is accepted only from root")
+
+    log_dir = Path.home() / ".local/state/shai/shapp/logs"
+    log_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
+    path = log_dir / f"{dt.date.today().isoformat()}.log"
+    fields = [args.action, args.source, args.item, args.detail]
+    cleaned = [value.replace("\t", " ").replace("\n", " ") for value in fields]
+    timestamp = dt.datetime.now().astimezone().isoformat(timespec="seconds")
+    with path.open("a", encoding="utf-8") as stream:
+        stream.write("\t".join([timestamp, *cleaned]) + "\n")
+    path.chmod(0o600)
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

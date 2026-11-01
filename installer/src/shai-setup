@@ -445,7 +445,7 @@ class SetupWindow(Gtk.ApplicationWindow):
             f"7. Local-AI intent: {'Yes; install AIA launcher only' if self.local_ai.get_active() else 'No'}.",
             f"8. Offline-by-default: {'Yes' if self.offline_mode.get_active() else 'No'}.",
             "9. Disable Events and Tasks notifications and GNOME online-account providers.",
-            "10. Disable media sharing, location grants, Wellbeing tracking, and automatic time sync.",
+            "10. Disable media sharing, location grants, and Wellbeing tracking; keep automatic time sync on.",
             "11. Apply the black and #33EE33 SHAI terminal palette.",
             "12. Save choices, inventory the completed system, and run final health checks.",
             "13. Show the completed-system summary and open SHAI Home.",
