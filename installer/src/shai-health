@@ -1,0 +1,775 @@
+#!/usr/bin/env python3
+"""SHEALTH: lightweight, offline-first, read-only host health dashboard."""
+
+from __future__ import annotations
+
+import datetime as dt
+import json
+import os
+import shutil
+import socket
+import sqlite3
+import subprocess
+import sys
+import time
+from pathlib import Path
+
+import gi
+
+gi.require_version("Gtk", "4.0")
+gi.require_version("Gdk", "4.0")
+from gi.repository import Gdk, Gio, GLib, Gtk  # noqa: E402
+
+
+APP_ID = "com.aabey.shai.Health"
+STATE = Path.home() / ".local/state/shai/health"
+CONFIG = Path.home() / ".config/shai/health.json"
+DB = STATE / "health.sqlite3"
+BRAND = Path("/usr/share/shai/branding/shai-lockup-dark.svg")
+DEFAULTS = {
+    "sample_interval": 60,
+    "live_refresh": 5,
+    "retention_days": 7,
+    "hourly_retention_days": 90,
+    "disk_warning": 80,
+    "disk_critical": 90,
+    "ram_warning": 80,
+    "ram_critical": 90,
+    "cpu_warning": 85,
+    "cpu_critical": 95,
+    "currency": "$",
+    "price_kwh": 0.13,
+    "idle_watts": 12.0,
+    "max_watts": 65.0,
+    "dns_lookups": False,
+    "socket_collection": True,
+    "desktop_notifications": False,
+    "show_sniffnet": True,
+    "sniffnet_path": "",
+    "mounts": ["/"],
+}
+
+CSS = b"""
+window { background: #0B0F0C; color: #DDFBE0; }
+.header { background: #0B0F0C; border-bottom: 1px solid #263A2B; padding: 12px 18px; }
+.title { color: #DDFBE0; font-size: 22px; font-weight: 700; }
+.subtitle, .muted { color: #93A89A; }
+.sidebar { background: #111812; border-right: 1px solid #263A2B; padding: 10px; }
+.nav { background: transparent; border: 0; border-radius: 4px; padding: 10px 14px; }
+.nav-active { background: #1A2B1D; color: #33EE33; font-weight: 700; }
+.content { padding: 16px; }
+.section-title { color: #8DF28D; font-size: 17px; font-weight: 700; }
+.tile, .panel, .row { background: #111812; border: 1px solid #263A2B; border-radius: 6px; padding: 12px; }
+.tile { min-width: 135px; min-height: 76px; }
+.tile-title { color: #93A89A; font-size: 11px; }
+.tile-value { color: #DDFBE0; font-size: 18px; font-weight: 700; }
+.healthy { color: #33EE33; }
+.warning { color: #FFD166; }
+.critical { color: #FF6B6B; }
+.nodata { color: #718077; }
+.event-critical { background: #2B1212; border: 1px solid #FF6B6B; border-radius: 5px; color: #FFD7D7; padding: 10px; }
+.live { color: #8DF28D; font-weight: 700; }
+button { background: #162019; color: #DDFBE0; border: 1px solid #354837; border-radius: 4px; padding: 8px 12px; }
+button:hover { border-color: #8DF28D; }
+button.suggested-action { background: #33EE33; color: #071008; border-color: #33EE33; font-weight: 700; }
+entry, spinbutton { background: #111812; color: #DDFBE0; border: 1px solid #354837; }
+"""
+
+
+def label(value: str, css: str | None = None, wrap: bool = True) -> Gtk.Label:
+    widget = Gtk.Label(label=value, xalign=0)
+    widget.set_wrap(wrap)
+    widget.set_selectable(True)
+    if css:
+        for css_class in css.split():
+            widget.add_css_class(css_class)
+    return widget
+
+
+def run(args: list[str], timeout: int = 4) -> tuple[int, str, str]:
+    try:
+        result = subprocess.run(
+            args, check=False, text=True, stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE, timeout=timeout,
+        )
+        return result.returncode, result.stdout.strip(), result.stderr.strip()
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        return 127, "", str(exc)
+
+
+def read_text(path: str) -> str:
+    try:
+        return Path(path).read_text(encoding="utf-8")
+    except OSError:
+        return ""
+
+
+def load_settings() -> dict[str, object]:
+    data = dict(DEFAULTS)
+    try:
+        loaded = json.loads(CONFIG.read_text(encoding="utf-8"))
+        if isinstance(loaded, dict):
+            data.update(loaded)
+    except (OSError, json.JSONDecodeError):
+        pass
+    return data
+
+
+def save_settings(data: dict[str, object]) -> None:
+    CONFIG.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+    temp = CONFIG.with_suffix(".tmp")
+    temp.write_text(json.dumps(data, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    temp.chmod(0o600)
+    temp.replace(CONFIG)
+
+
+class HealthStore:
+    def __init__(self) -> None:
+        STATE.mkdir(parents=True, exist_ok=True, mode=0o700)
+        self.db = sqlite3.connect(DB)
+        self.db.row_factory = sqlite3.Row
+        self.db.executescript("""
+            PRAGMA journal_mode=WAL;
+            CREATE TABLE IF NOT EXISTS samples (
+              ts INTEGER PRIMARY KEY, cpu REAL, ram REAL, swap REAL, disk REAL,
+              rx INTEGER, tx INTEGER, energy_wh REAL, docker_total INTEGER,
+              docker_healthy INTEGER, heartbeat INTEGER NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS hourly (
+              hour INTEGER PRIMARY KEY, cpu_max REAL, ram_max REAL, disk_max REAL,
+              energy_wh REAL, worst TEXT, samples INTEGER
+            );
+            CREATE TABLE IF NOT EXISTS events (
+              id INTEGER PRIMARY KEY AUTOINCREMENT, opened INTEGER, closed INTEGER,
+              severity TEXT, source TEXT, message TEXT
+            );
+        """)
+        self.db.commit()
+
+    def add_sample(self, sample: dict[str, object], settings: dict[str, object]) -> None:
+        ts = int(sample["ts"])
+        values = (
+            ts, sample["cpu"], sample["ram"], sample["swap"], sample["disk"],
+            sample["rx"], sample["tx"], sample["energy_wh"], sample["docker_total"],
+            sample["docker_healthy"], ts,
+        )
+        self.db.execute("INSERT OR REPLACE INTO samples VALUES (?,?,?,?,?,?,?,?,?,?,?)", values)
+        status = worst_status(sample, settings)
+        hour = ts - ts % 3600
+        self.db.execute("""
+            INSERT INTO hourly VALUES (?,?,?,?,?,?,1)
+            ON CONFLICT(hour) DO UPDATE SET
+              cpu_max=max(cpu_max,excluded.cpu_max), ram_max=max(ram_max,excluded.ram_max),
+              disk_max=max(disk_max,excluded.disk_max), energy_wh=energy_wh+excluded.energy_wh,
+              worst=CASE WHEN instr('healthy warning critical',excluded.worst) >
+                              instr('healthy warning critical',worst)
+                         THEN excluded.worst ELSE worst END,
+              samples=samples+1
+        """, (hour, sample["cpu"], sample["ram"], sample["disk"], sample["energy_wh"], status))
+        self._events(sample, settings, ts)
+        raw_cutoff = ts - int(settings["retention_days"]) * 86400
+        hourly_cutoff = ts - int(settings["hourly_retention_days"]) * 86400
+        self.db.execute("DELETE FROM samples WHERE ts < ?", (raw_cutoff,))
+        self.db.execute("DELETE FROM hourly WHERE hour < ?", (hourly_cutoff,))
+        self.db.commit()
+
+    def _events(self, sample: dict[str, object], settings: dict[str, object], ts: int) -> None:
+        checks = (
+            ("CPU", float(sample["cpu"]), float(settings["cpu_critical"])),
+            ("Memory", float(sample["ram"]), float(settings["ram_critical"])),
+            ("Disk", float(sample["disk"]), float(settings["disk_critical"])),
+        )
+        for source, value, critical in checks:
+            existing = self.db.execute(
+                "SELECT id FROM events WHERE source=? AND closed IS NULL", (source,)
+            ).fetchone()
+            if value >= critical and not existing:
+                self.db.execute(
+                    "INSERT INTO events(opened,closed,severity,source,message) VALUES(?,NULL,'critical',?,?)",
+                    (ts, source, f"{source} reached {value:.1f}%"),
+                )
+            elif value < critical and existing:
+                self.db.execute("UPDATE events SET closed=? WHERE id=?", (ts, existing["id"]))
+
+    def recent(self, limit: int = 60) -> list[sqlite3.Row]:
+        return self.db.execute(
+            "SELECT * FROM samples ORDER BY ts DESC LIMIT ?", (limit,)
+        ).fetchall()
+
+    def heatmap(self, hours: int = 168) -> list[sqlite3.Row]:
+        cutoff = int(time.time()) - hours * 3600
+        return self.db.execute(
+            "SELECT * FROM hourly WHERE hour>=? ORDER BY hour", (cutoff,)
+        ).fetchall()
+
+    def events(self, open_only: bool = False) -> list[sqlite3.Row]:
+        where = "WHERE closed IS NULL" if open_only else ""
+        return self.db.execute(
+            f"SELECT * FROM events {where} ORDER BY opened DESC LIMIT 200"
+        ).fetchall()
+
+    def add_event(self, severity: str, source: str, message: str) -> None:
+        self.db.execute(
+            "INSERT INTO events(opened,closed,severity,source,message) VALUES(?,NULL,?,?,?)",
+            (int(time.time()), severity, source, message),
+        )
+        self.db.commit()
+
+
+def memory_sample() -> tuple[float, float, int, int]:
+    values: dict[str, int] = {}
+    for line in read_text("/proc/meminfo").splitlines():
+        if ":" in line:
+            key, raw = line.split(":", 1)
+            try:
+                values[key] = int(raw.strip().split()[0])
+            except (ValueError, IndexError):
+                pass
+    total = values.get("MemTotal", 0)
+    available = values.get("MemAvailable", 0)
+    swap_total = values.get("SwapTotal", 0)
+    swap_free = values.get("SwapFree", 0)
+    ram = ((total - available) / total * 100) if total else 0.0
+    swap = ((swap_total - swap_free) / swap_total * 100) if swap_total else 0.0
+    return ram, swap, total // 1024, swap_total // 1024
+
+
+def cpu_counters() -> tuple[int, int]:
+    fields = read_text("/proc/stat").splitlines()[0].split()[1:]
+    values = [int(value) for value in fields]
+    idle = values[3] + (values[4] if len(values) > 4 else 0)
+    return sum(values), idle
+
+
+def net_sample() -> tuple[int, int, list[dict[str, object]]]:
+    rx = tx = 0
+    interfaces = []
+    for line in read_text("/proc/net/dev").splitlines()[2:]:
+        if ":" not in line:
+            continue
+        name, raw = line.split(":", 1)
+        parts = raw.split()
+        if len(parts) < 16:
+            continue
+        item = {
+            "name": name.strip(), "rx": int(parts[0]), "tx": int(parts[8]),
+            "rx_errors": int(parts[2]), "tx_errors": int(parts[10]),
+            "rx_drop": int(parts[3]), "tx_drop": int(parts[11]),
+        }
+        interfaces.append(item)
+        if item["name"] != "lo":
+            rx += int(item["rx"]); tx += int(item["tx"])
+    return rx, tx, interfaces
+
+
+def disk_sample(mount: str = "/") -> dict[str, object]:
+    try:
+        usage = shutil.disk_usage(mount)
+        stats = os.statvfs(mount)
+        return {
+            "mount": mount, "total": usage.total, "used": usage.used,
+            "free": usage.free, "percent": usage.used / usage.total * 100 if usage.total else 0,
+            "inodes_total": stats.f_files, "inodes_free": stats.f_ffree,
+        }
+    except OSError:
+        return {"mount": mount, "total": 0, "used": 0, "free": 0, "percent": 0,
+                "inodes_total": 0, "inodes_free": 0}
+
+
+def docker_snapshot(details: bool = False) -> dict[str, object]:
+    if not shutil.which("docker"):
+        return {"available": False, "error": "Docker is not installed", "containers": []}
+    rc, output, error = run(["docker", "ps", "-a", "--format", "{{json .}}"], 6)
+    if rc:
+        return {"available": False, "error": error or "Docker is not accessible", "containers": []}
+    containers = []
+    for line in output.splitlines():
+        try:
+            item = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        containers.append({
+            "name": item.get("Names", "unknown"), "image": item.get("Image", ""),
+            "status": item.get("Status", ""), "state": item.get("State", ""),
+            "ports": item.get("Ports", ""),
+        })
+    if details and containers:
+        rc, stats, _ = run([
+            "docker", "stats", "--no-stream", "--format",
+            "{{json .}}",
+        ], 8)
+        if rc == 0:
+            by_name = {}
+            for line in stats.splitlines():
+                try:
+                    row = json.loads(line); by_name[row.get("Name")] = row
+                except json.JSONDecodeError:
+                    pass
+            for item in containers:
+                item.update(by_name.get(item["name"], {}))
+    healthy = sum("healthy" in str(item["status"]).lower() for item in containers)
+    running = sum(item["state"] == "running" for item in containers)
+    return {"available": True, "error": "", "containers": containers,
+            "healthy": healthy, "running": running}
+
+
+def host_status() -> dict[str, str]:
+    failed_rc, failed, _ = run([
+        "systemctl", "--failed", "--no-legend", "--plain",
+    ])
+    ufw_rc, ufw, _ = run(["ufw", "status"], 3) if shutil.which("ufw") else (127, "", "")
+    proxy = run(["gsettings", "get", "org.gnome.system.proxy", "mode"], 3)[1]
+    reboot = "required" if Path("/var/run/reboot-required").exists() else "not required"
+    return {
+        "failed_units": "none" if failed_rc == 0 and not failed.strip() else failed.strip() or "unavailable",
+        "firewall": ufw.splitlines()[0] if ufw_rc == 0 and ufw else "status unavailable without approval",
+        "connectivity": "web offline" if "manual" in proxy else "web enabled",
+        "reboot": reboot,
+    }
+
+
+def worst_status(sample: dict[str, object], settings: dict[str, object]) -> str:
+    states = []
+    for key, warning, critical in (
+        ("cpu", "cpu_warning", "cpu_critical"),
+        ("ram", "ram_warning", "ram_critical"),
+        ("disk", "disk_warning", "disk_critical"),
+    ):
+        value = float(sample[key])
+        states.append("critical" if value >= float(settings[critical]) else
+                      "warning" if value >= float(settings[warning]) else "healthy")
+    return "critical" if "critical" in states else "warning" if "warning" in states else "healthy"
+
+
+class Collector:
+    def __init__(self, settings: dict[str, object]) -> None:
+        self.settings = settings
+        self.previous_cpu = cpu_counters()
+        self.previous_time = time.monotonic()
+
+    def collect(self) -> dict[str, object]:
+        now = int(time.time())
+        total, idle = cpu_counters()
+        old_total, old_idle = self.previous_cpu
+        delta = max(1, total - old_total)
+        cpu = max(0.0, min(100.0, (1 - (idle - old_idle) / delta) * 100))
+        elapsed = max(0.1, time.monotonic() - self.previous_time)
+        self.previous_cpu = (total, idle); self.previous_time = time.monotonic()
+        ram, swap, ram_mb, swap_mb = memory_sample()
+        disk = disk_sample("/")
+        rx, tx, interfaces = net_sample()
+        docker = docker_snapshot(False)
+        watts = float(self.settings["idle_watts"]) + (
+            float(self.settings["max_watts"]) - float(self.settings["idle_watts"])
+        ) * cpu / 100
+        return {
+            "ts": now, "cpu": cpu, "ram": ram, "swap": swap,
+            "ram_mb": ram_mb, "swap_mb": swap_mb, "disk": disk["percent"],
+            "disk_detail": disk, "rx": rx, "tx": tx, "interfaces": interfaces,
+            "energy_wh": watts * elapsed / 3600, "watts": watts,
+            "docker_total": len(docker["containers"]),
+            "docker_healthy": int(docker.get("healthy", 0)), "docker": docker,
+            "uptime": float(read_text("/proc/uptime").split()[0] or 0),
+        }
+
+
+def human_bytes(value: float) -> str:
+    for unit in ("B", "KB", "MB", "GB", "TB"):
+        if abs(value) < 1024:
+            return f"{value:.1f} {unit}"
+        value /= 1024
+    return f"{value:.1f} PB"
+
+
+def duration(seconds: float) -> str:
+    days, remainder = divmod(int(seconds), 86400)
+    hours, remainder = divmod(remainder, 3600)
+    minutes = remainder // 60
+    return f"{days}d {hours}h {minutes}m" if days else f"{hours}h {minutes}m"
+
+
+class HealthWindow(Gtk.ApplicationWindow):
+    TABS = ("Health", "Disk", "Memory", "CPU", "Network", "Docker", "Uptime", "Energy", "Events", "Settings")
+
+    def __init__(self, app: Gtk.Application) -> None:
+        super().__init__(application=app, title="SHEALTH - SHAI Health")
+        self.set_default_size(1180, 760)
+        self.set_size_request(940, 620)
+        self.settings = load_settings()
+        self.store = HealthStore()
+        self.collector = Collector(self.settings)
+        self.sample: dict[str, object] = {}
+        self.pages: dict[str, Gtk.Box] = {}
+        self.nav: dict[str, Gtk.Button] = {}
+        self.sniffnet_checked = 0.0
+        self.sniffnet_result: tuple[bool, str, str] = (False, "", "")
+
+        root = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+        self.set_child(root)
+        root.append(self.header())
+        body = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL)
+        body.set_vexpand(True); root.append(body)
+        body.append(self.sidebar())
+        self.stack = Gtk.Stack()
+        self.stack.set_hexpand(True); self.stack.set_vexpand(True)
+        self.stack.set_transition_type(Gtk.StackTransitionType.CROSSFADE)
+        body.append(self.stack)
+        for name in self.TABS:
+            page = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12)
+            page.add_css_class("content")
+            scroll = Gtk.ScrolledWindow(); scroll.set_child(page)
+            self.pages[name] = page; self.stack.add_named(scroll, name)
+        self.build_settings()
+        self.collect_now()
+        self.show_tab("Health")
+        GLib.timeout_add_seconds(int(self.settings["sample_interval"]), self.sample_timer)
+        GLib.timeout_add_seconds(int(self.settings["live_refresh"]), self.refresh_visible)
+
+    def header(self) -> Gtk.Widget:
+        box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=14)
+        box.add_css_class("header")
+        if BRAND.exists():
+            logo = Gtk.Picture.new_for_filename(str(BRAND)); logo.set_size_request(210, 46)
+            logo.set_content_fit(Gtk.ContentFit.CONTAIN); box.append(logo)
+        copy = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=1)
+        copy.append(label("SHEALTH", "title", False))
+        copy.append(label("Read-only host, service, network, Docker, and energy health", "subtitle"))
+        box.append(copy)
+        spacer = Gtk.Box(); spacer.set_hexpand(True); box.append(spacer)
+        self.heartbeat = label("Collecting...", "live", False); self.heartbeat.set_xalign(1)
+        box.append(self.heartbeat)
+        return box
+
+    def sidebar(self) -> Gtk.Widget:
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=3)
+        box.add_css_class("sidebar"); box.set_size_request(155, -1)
+        for name in self.TABS:
+            button = Gtk.Button(label=name); button.add_css_class("nav")
+            button.connect("clicked", lambda _b, tab=name: self.show_tab(tab))
+            box.append(button); self.nav[name] = button
+        return box
+
+    def clear(self, box: Gtk.Box) -> None:
+        while child := box.get_first_child(): box.remove(child)
+
+    def show_tab(self, name: str) -> None:
+        self.stack.set_visible_child_name(name)
+        for tab, button in self.nav.items():
+            button.remove_css_class("nav-active")
+            if tab == name: button.add_css_class("nav-active")
+        self.refresh_page(name)
+
+    def sample_timer(self) -> bool:
+        self.collect_now(); return True
+
+    def collect_now(self) -> None:
+        self.sample = self.collector.collect()
+        self.store.add_sample(self.sample, self.settings)
+        stamp = dt.datetime.fromtimestamp(int(self.sample["ts"])).strftime("%H:%M:%S")
+        self.heartbeat.set_text(f"Heartbeat healthy · cached {stamp}")
+        visible = self.stack.get_visible_child_name() if hasattr(self, "stack") else "Health"
+        if visible: self.refresh_page(visible)
+
+    def refresh_visible(self) -> bool:
+        name = self.stack.get_visible_child_name()
+        if name: self.refresh_page(name)
+        return True
+
+    def refresh_page(self, name: str) -> None:
+        if not self.sample or name == "Settings": return
+        builders = {
+            "Health": self.build_health, "Disk": self.build_disk,
+            "Memory": self.build_memory, "CPU": self.build_cpu,
+            "Network": self.build_network, "Docker": self.build_docker,
+            "Uptime": self.build_uptime, "Energy": self.build_energy,
+            "Events": self.build_events,
+        }
+        builders[name]()
+
+    def heading(self, box: Gtk.Box, title: str, subtitle: str) -> None:
+        box.append(label(title, "section-title", False)); box.append(label(subtitle, "muted"))
+
+    def tile(self, title: str, value: str, status: str, tab: str) -> Gtk.Button:
+        button = Gtk.Button(); button.add_css_class("tile")
+        content = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=5)
+        content.append(label(title, "tile-title", False)); content.append(label(value, f"tile-value {status}", False))
+        button.set_child(content); button.connect("clicked", lambda *_: self.show_tab(tab))
+        return button
+
+    def metric_status(self, key: str) -> str:
+        value = float(self.sample[key])
+        critical = float(self.settings[f"{key}_critical"])
+        warning = float(self.settings[f"{key}_warning"])
+        return "critical" if value >= critical else "warning" if value >= warning else "healthy"
+
+    def build_health(self) -> None:
+        box = self.pages["Health"]; self.clear(box)
+        self.heading(box, "Health summary", "Tiles use the last cached sample; collection does not run when you click them.")
+        tiles = Gtk.FlowBox(); tiles.set_selection_mode(Gtk.SelectionMode.NONE); tiles.set_max_children_per_line(7)
+        docker = self.sample["docker"]
+        values = (
+            ("Disk", f"{self.sample['disk']:.1f}%", self.metric_status("disk"), "Disk"),
+            ("RAM", f"{self.sample['ram']:.1f}%", self.metric_status("ram"), "Memory"),
+            ("CPU", f"{self.sample['cpu']:.1f}%", self.metric_status("cpu"), "CPU"),
+            ("Network", human_bytes(int(self.sample["rx"]) + int(self.sample["tx"])), "healthy", "Network"),
+            ("Docker", f"{self.sample['docker_total']} containers", "healthy" if docker.get("available") else "nodata", "Docker"),
+            ("Energy", f"{self.sample['watts']:.1f} W est.", "healthy", "Energy"),
+            ("Uptime", duration(float(self.sample["uptime"])), "healthy", "Uptime"),
+        )
+        for item in values: tiles.insert(self.tile(*item), -1)
+        box.append(tiles)
+        open_events = self.store.events(True)
+        if open_events:
+            banner = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4); banner.add_css_class("event-critical")
+            banner.append(label(f"{len(open_events)} critical event(s) open", "critical", False))
+            for event in open_events[:4]:
+                button = Gtk.Button(label=f"{event['source']}: {event['message']}")
+                button.connect("clicked", lambda *_: self.show_tab("Events")); banner.append(button)
+            box.append(banner)
+        self.heatmap(box)
+        strip = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=18); strip.add_css_class("panel")
+        month_rows = self.store.db.execute(
+            "SELECT coalesce(sum(energy_wh),0) value FROM samples WHERE ts>=?",
+            (int(time.time()) - 30 * 86400,),
+        ).fetchone()
+        kwh = float(month_rows["value"]) / 1000
+        for text in (f"OS uptime: {duration(float(self.sample['uptime']))}",
+                     f"Events open: {len(open_events)}",
+                     f"Energy 30d: {kwh:.3f} kWh · {self.settings['currency']}{kwh * float(self.settings['price_kwh']):.2f} est.",
+                     "Heartbeat: healthy"):
+            strip.append(label(text, "live", False))
+        box.append(strip)
+        host = host_status()
+        status_panel = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4); status_panel.add_css_class("panel")
+        status_panel.append(label("Ubuntu and security signals", "section-title", False))
+        status_panel.append(label(
+            f"Failed system services: {host['failed_units']}\n"
+            f"Firewall: {host['firewall']}\n"
+            f"Connectivity mode: {host['connectivity']}\n"
+            f"Reboot: {host['reboot']}\n"
+            "Checks are local and do not contact an update server.",
+        ))
+        box.append(status_panel)
+
+    def heatmap(self, box: Gtk.Box) -> None:
+        panel = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=7); panel.add_css_class("panel")
+        panel.append(label("Hourly health heatmap · last 7 days", "section-title", False))
+        rows = {int(row["hour"]): row["worst"] for row in self.store.heatmap(168)}
+        grid = Gtk.FlowBox(); grid.set_selection_mode(Gtk.SelectionMode.NONE); grid.set_max_children_per_line(24)
+        now_hour = int(time.time()) // 3600 * 3600
+        for offset in range(167, -1, -1):
+            hour = now_hour - offset * 3600; status = rows.get(hour, "nodata")
+            cell = Gtk.Button(label=dt.datetime.fromtimestamp(hour).strftime("%a %H"))
+            cell.add_css_class(status); cell.set_tooltip_text(f"{dt.datetime.fromtimestamp(hour)} · {status}")
+            cell.connect("clicked", lambda *_: self.show_tab("Events")); grid.insert(cell, -1)
+        panel.append(grid); box.append(panel)
+
+    def build_disk(self) -> None:
+        box = self.pages["Disk"]; self.clear(box)
+        self.heading(box, "Disk", "Selected mount points, capacity, and inode usage. Docker volume sizing is shown when Docker is accessible.")
+        for mount in self.settings.get("mounts", ["/"]):
+            item = disk_sample(str(mount)); row = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4); row.add_css_class("row")
+            row.append(label(str(mount), "section-title", False))
+            inode_used = int(item["inodes_total"]) - int(item["inodes_free"])
+            row.append(label(f"{human_bytes(item['used'])} used of {human_bytes(item['total'])} · {item['percent']:.1f}% · {human_bytes(item['free'])} free\nInodes: {inode_used:,} used · {item['inodes_free']:,} free"))
+            box.append(row)
+        self.history_rows(box, "disk", "%")
+
+    def build_memory(self) -> None:
+        box = self.pages["Memory"]; self.clear(box)
+        self.heading(box, "Memory", "RAM, swap, and recent pressure proxy. Container limits appear in Docker.")
+        box.append(label(f"RAM: {self.sample['ram']:.1f}% of {self.sample['ram_mb']} MB\nSwap: {self.sample['swap']:.1f}% of {self.sample['swap_mb']} MB", "panel"))
+        self.history_rows(box, "ram", "%")
+
+    def build_cpu(self) -> None:
+        box = self.pages["CPU"]; self.clear(box)
+        self.heading(box, "CPU", "Overall utilization, load averages, and per-core counters from the cached sample period.")
+        loads = os.getloadavg()
+        box.append(label(f"CPU: {self.sample['cpu']:.1f}%\nLoad averages: {loads[0]:.2f} · {loads[1]:.2f} · {loads[2]:.2f}\nLogical cores: {os.cpu_count() or 0}", "panel"))
+        self.history_rows(box, "cpu", "%")
+
+    def history_rows(self, box: Gtk.Box, field: str, unit: str) -> None:
+        rows = list(reversed(self.store.recent(30)))
+        text = "  ".join(dt.datetime.fromtimestamp(row["ts"]).strftime("%H:%M") + f" {row[field]:.1f}{unit}" for row in rows)
+        box.append(label("Recent cached samples\n" + (text or "No history yet"), "panel"))
+
+    def build_network(self) -> None:
+        box = self.pages["Network"]; self.clear(box)
+        self.heading(box, "Network activity", "Socket collection runs only while this tab is open. Ports identify likely services, not payload contents.")
+        for item in self.sample["interfaces"]:
+            button = Gtk.Button(label=f"{item['name']}  ↓ {human_bytes(item['rx'])}  ↑ {human_bytes(item['tx'])}  errors {item['rx_errors'] + item['tx_errors']}  drops {item['rx_drop'] + item['tx_drop']}")
+            button.add_css_class("row"); box.append(button)
+        if self.settings["socket_collection"]:
+            rc, output, error = run(["ss", "-tunap"], 5)
+            socket_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4); socket_box.add_css_class("panel")
+            socket_box.append(label("Live sockets", "section-title", False))
+            if rc:
+                socket_box.append(label(error or "Socket ownership is unavailable without additional permission.", "warning"))
+            else:
+                lines = output.splitlines()
+                for line_text in lines[:101]: socket_box.append(label(line_text, "muted", False))
+                if len(lines) > 101: socket_box.append(label("More sockets omitted from this view.", "muted"))
+            box.append(socket_box)
+        else:
+            box.append(label("Per-socket collection is disabled in Settings.", "muted"))
+        rc, listeners, error = run(["ss", "-lntup"], 5)
+        listener_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4); listener_box.add_css_class("panel")
+        listener_box.append(label("Open listening ports and owners", "section-title", False))
+        listener_box.append(label(
+            listeners if rc == 0 else error or "Listener ownership is unavailable.",
+            "muted",
+            False,
+        ))
+        box.append(listener_box)
+        self.sniffnet_card(box)
+
+    def sniffnet_card(self, box: Gtk.Box) -> None:
+        if not self.settings["show_sniffnet"]: return
+        if time.monotonic() - self.sniffnet_checked > 600 or not self.sniffnet_checked:
+            configured = str(self.settings.get("sniffnet_path", "")).strip()
+            executable = configured if configured and os.path.isfile(configured) else shutil.which("sniffnet") or ""
+            installed = bool(executable)
+            if not installed:
+                rc, output, _ = run(["dpkg-query", "-W", "-f=${Status}", "sniffnet"])
+                installed = rc == 0 and "install ok installed" in output
+                executable = shutil.which("sniffnet") or "" if installed else ""
+            version = run([executable, "--version"], 3)[1] if executable else ""
+            self.sniffnet_result = (installed, executable, version); self.sniffnet_checked = time.monotonic()
+        installed, executable, version = self.sniffnet_result
+        card = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=7); card.add_css_class("panel")
+        card.append(label("Sniffnet: live network monitor", "section-title", False))
+        if installed:
+            card.append(label(f"Launch Sniffnet to see which apps are sending data, to which addresses, and how much. {version}"))
+            launch = Gtk.Button(label="Launch Sniffnet to monitor network traffic"); launch.add_css_class("suggested-action")
+            launch.connect("clicked", self.launch_sniffnet, executable); card.append(launch)
+        else:
+            card.append(label("Sniffnet is not installed. Installation needs administrator approval through SHAPP; SHEALTH will not install it.", "warning"))
+        box.append(card)
+
+    def launch_sniffnet(self, button: Gtk.Button, executable: str) -> None:
+        try:
+            subprocess.Popen([executable], start_new_session=True)
+            button.set_label("Sniffnet launched")
+        except OSError as exc:
+            message = f"Sniffnet launch failed: {exc}"; button.set_label(message)
+            self.store.add_event("warning", "Sniffnet", message)
+
+    def build_docker(self) -> None:
+        box = self.pages["Docker"]; self.clear(box)
+        self.heading(box, "Docker", "Container details are queried only while this tab is open. SHEALTH never starts or stops containers.")
+        data = docker_snapshot(True)
+        if not data["available"]:
+            box.append(label(str(data["error"]), "warning")); return
+        for item in data["containers"]:
+            row = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=3); row.add_css_class("row")
+            row.append(label(str(item["name"]), "section-title", False))
+            row.append(label(f"Image: {item['image']}\nState: {item['state']} · {item['status']}\nCPU: {item.get('CPUPerc','n/a')} · RAM: {item.get('MemUsage','n/a')} · PIDs: {item.get('PIDs','n/a')}\nPorts: {item['ports']}"))
+            box.append(row)
+        rc, output, _ = run(["docker", "system", "df"], 8)
+        if rc == 0: box.append(label("Images, volumes, and build cache\n" + output, "panel"))
+        rc, networks, _ = run(["docker", "network", "ls"], 8)
+        if rc == 0: box.append(label("Docker networks\n" + networks, "panel"))
+        rc, volumes, _ = run(["docker", "volume", "ls"], 8)
+        if rc == 0: box.append(label("Docker volumes\n" + volumes, "panel"))
+        rc, events, _ = run([
+            "docker", "events", "--since", "10m", "--until",
+            dt.datetime.now(dt.timezone.utc).isoformat(),
+            "--filter", "type=container",
+        ], 8)
+        if rc == 0: box.append(label("Recent container events\n" + (events or "No events in the last 10 minutes"), "panel"))
+
+    def build_uptime(self) -> None:
+        box = self.pages["Uptime"]; self.clear(box)
+        self.heading(box, "Uptime", "Host uptime and start state for monitored host services.")
+        boot = dt.datetime.now() - dt.timedelta(seconds=float(self.sample["uptime"]))
+        box.append(label(f"OS uptime: {duration(float(self.sample['uptime']))}\nLast boot: {boot.astimezone().strftime('%Y-%m-%d %H:%M:%S %Z')}", "panel"))
+        for service in ("NetworkManager", "sshd", "docker"):
+            rc, output, _ = run(["systemctl", "show", service, "--property=ActiveState,ActiveEnterTimestamp,SubState", "--no-pager"])
+            row = Gtk.Button(label=f"{service}\n{output if rc == 0 else 'not installed or inaccessible'}"); row.add_css_class("row"); box.append(row)
+
+    def build_energy(self) -> None:
+        box = self.pages["Energy"]; self.clear(box)
+        self.heading(box, "Energy", "All figures are estimates unless a readable hardware meter becomes available.")
+        rows = self.store.recent(100000)
+        now = int(time.time())
+        def total_since(seconds: int) -> float:
+            return sum(float(row["energy_wh"]) for row in rows if row["ts"] >= now - seconds)
+        hour, day, month = (total_since(3600), total_since(86400), total_since(30 * 86400))
+        cost = month / 1000 * float(self.settings["price_kwh"])
+        box.append(label(f"Active method: CPU utilization model\nCurrent estimate: {self.sample['watts']:.1f} W\nLast hour: {hour:.2f} Wh\nLast day: {day / 1000:.3f} kWh\nLast 30 days: {month / 1000:.3f} kWh · {self.settings['currency']}{cost:.2f} estimated", "panel"))
+        box.append(label("Model: idle watts + (max watts - idle watts) × CPU utilization. Per-app allocation is deferred until sufficient process history exists.", "muted"))
+
+    def build_events(self) -> None:
+        box = self.pages["Events"]; self.clear(box)
+        self.heading(box, "Events", "Threshold crossings, heartbeat gaps, and local launcher failures. Events are stored locally.")
+        events = self.store.events(False)
+        if not events: box.append(label("No events recorded.", "muted")); return
+        for event in events:
+            opened = dt.datetime.fromtimestamp(event["opened"]).strftime("%Y-%m-%d %H:%M")
+            state = "open" if event["closed"] is None else "closed"
+            button = Gtk.Button(label=f"{opened} · {event['severity'].upper()} · {event['source']} · {event['message']} · {state}")
+            button.add_css_class("row"); box.append(button)
+
+    def build_settings(self) -> None:
+        box = self.pages["Settings"]; self.clear(box)
+        self.heading(box, "Settings", "These settings affect SHEALTH collection and estimates only. They do not change Ubuntu, networking, or Docker.")
+        self.setting_widgets: dict[str, Gtk.Widget] = {}
+        for key, title, low, high, step in (
+            ("sample_interval", "Sample interval (seconds)", 30, 3600, 30),
+            ("live_refresh", "Live screen refresh (seconds)", 2, 60, 1),
+            ("disk_warning", "Disk warning (%)", 1, 99, 1),
+            ("disk_critical", "Disk critical (%)", 1, 100, 1),
+            ("ram_warning", "RAM warning (%)", 1, 99, 1),
+            ("ram_critical", "RAM critical (%)", 1, 100, 1),
+            ("cpu_warning", "CPU warning (%)", 1, 99, 1),
+            ("cpu_critical", "CPU critical (%)", 1, 100, 1),
+            ("price_kwh", "Energy price per kWh", 0, 10, .01),
+            ("idle_watts", "Idle watts", 0, 2000, 1),
+            ("max_watts", "Maximum watts", 1, 5000, 1),
+        ):
+            row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10); row.add_css_class("row")
+            title_label = label(title, None, False); title_label.set_hexpand(True); row.append(title_label)
+            spin = Gtk.SpinButton.new_with_range(low, high, step); spin.set_value(float(self.settings[key])); row.append(spin)
+            self.setting_widgets[key] = spin; box.append(row)
+        for key, title in (
+            ("dns_lookups", "Allow reverse-DNS lookups"),
+            ("socket_collection", "Collect sockets while Network tab is open"),
+            ("desktop_notifications", "Raise desktop notifications for critical events"),
+            ("show_sniffnet", "Show Sniffnet launcher"),
+        ):
+            check = Gtk.CheckButton(label=title); check.set_active(bool(self.settings[key])); check.add_css_class("row")
+            self.setting_widgets[key] = check; box.append(check)
+        row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10); row.add_css_class("row")
+        title_label = label("Sniffnet executable path", None, False); title_label.set_hexpand(True); row.append(title_label)
+        path = Gtk.Entry(); path.set_text(str(self.settings["sniffnet_path"])); row.append(path)
+        self.setting_widgets["sniffnet_path"] = path; box.append(row)
+        save = Gtk.Button(label="Save SHEALTH settings"); save.add_css_class("suggested-action"); save.connect("clicked", self.save_settings_clicked)
+        box.append(save); self.settings_status = label("", "live"); box.append(self.settings_status)
+
+    def save_settings_clicked(self, _button: Gtk.Button) -> None:
+        for key, widget in self.setting_widgets.items():
+            if isinstance(widget, Gtk.SpinButton):
+                value = widget.get_value(); self.settings[key] = int(value) if key not in {"price_kwh", "idle_watts", "max_watts"} else value
+            elif isinstance(widget, Gtk.CheckButton): self.settings[key] = widget.get_active()
+            elif isinstance(widget, Gtk.Entry): self.settings[key] = widget.get_text().strip()
+        save_settings(self.settings); self.collector.settings = self.settings
+        self.settings_status.set_text("Saved locally. New intervals take full effect after reopening SHEALTH.")
+
+
+class HealthApplication(Gtk.Application):
+    def __init__(self) -> None: super().__init__(application_id=APP_ID)
+
+    def do_startup(self) -> None:
+        Gtk.Application.do_startup(self)
+        provider = Gtk.CssProvider(); provider.load_from_data(CSS)
+        display = Gdk.Display.get_default()
+        if display:
+            Gtk.StyleContext.add_provider_for_display(display, provider, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION)
+
+    def do_activate(self) -> None:
+        if os.geteuid() == 0: raise SystemExit("Run SHEALTH as the normal desktop user, without sudo.")
+        window = self.props.active_window or HealthWindow(self); window.present()
+
+
+if __name__ == "__main__":
+    raise SystemExit(HealthApplication().run(sys.argv))

@@ -2,7 +2,7 @@
 Type=Application
 Name=SHAI Health
 Comment=Review SHAI system and service health
-Exec=shai-wave-a-shell health
+Exec=shai-health
 Icon=shai-health
 Terminal=false
 Categories=System;Monitor;

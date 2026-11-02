@@ -120,9 +120,14 @@ class ShellWindow(Gtk.ApplicationWindow):
 
     @staticmethod
     def launch(mode: str) -> None:
-        executable = shutil.which("shai-appearance" if mode == "appearance" else "shai-wave-a-shell")
+        dedicated = {
+            "appearance": "shai-appearance",
+            "shapp": "shai-shapp",
+            "health": "shai-health",
+        }
+        executable = shutil.which(dedicated.get(mode, "shai-wave-a-shell"))
         if executable:
-            command = [executable] if mode == "appearance" else [executable, mode]
+            command = [executable] if mode in dedicated else [executable, mode]
             subprocess.Popen(command, start_new_session=True)
 
     def build_home(self, content: Gtk.Box) -> None:
@@ -145,8 +150,9 @@ class ShellWindow(Gtk.ApplicationWindow):
         content.append(summary)
         content.append(label(
             "Setup installed the tested base profile, v2 desktop theme, Web Offline toggle, "
-            "and app launchers. Live Home Assistant, device, AI, port, firewall, and update "
-            "panels arrive in their implementation waves and are not simulated here.",
+            "and app launchers. SHEALTH now provides read-only host, network, Docker, event, "
+            "uptime, and estimated-energy monitoring. Service-specific Home Assistant and AI "
+            "panels arrive with those application backends.",
             "warning",
         ))
         row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)

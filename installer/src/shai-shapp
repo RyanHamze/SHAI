@@ -51,6 +51,7 @@ window { background: #0B0F0C; color: #DDFBE0; }
 .app-name { color: #DDFBE0; font-weight: 700; font-size: 15px; }
 .app-detail { color: #A7B7AA; font-size: 12px; }
 .online { color: #FFE49A; font-size: 12px; }
+.live-setting { background: #17261A; border: 1px solid #33EE33; border-radius: 5px; color: #8DF28D; font-weight: 700; padding: 9px; }
 .locked { color: #93A89A; font-size: 12px; }
 .cart { background: #111812; border: 2px solid #33EE33; border-radius: 7px; padding: 11px; }
 .cart-title { color: #33EE33; font-size: 18px; font-weight: 700; }
@@ -473,6 +474,7 @@ class ShappWindow(Gtk.ApplicationWindow):
             "muted",
         ))
         self.architecture_state = text_label("", "online")
+        self.architecture_state.add_css_class("live-setting")
         page.append(self.architecture_state)
         self.update_architecture_state()
         return page
@@ -484,7 +486,7 @@ class ShappWindow(Gtk.ApplicationWindow):
             else "SHAI-managed Docker stack"
         )
         self.architecture_state.set_text(
-            f"Current: {label} · selected by {self.architecture_source}"
+            f"LIVE AUTOSAVE · Current: {label} · selected by {self.architecture_source}"
         )
 
     def architecture_changed(
@@ -492,12 +494,59 @@ class ShappWindow(Gtk.ApplicationWindow):
     ) -> None:
         if self.architecture_refreshing or not button.get_active():
             return
+        if architecture == self.architecture_mode:
+            return
+        previous = self.architecture_mode
+        self.architecture_refreshing = True
+        self.direct_architecture.set_active(previous == "direct-host")
+        self.managed_architecture.set_active(previous == "managed-stack")
+        self.architecture_refreshing = False
+
+        dialog = Gtk.Dialog(
+            title="Change application architecture?",
+            transient_for=self,
+            modal=True,
+        )
+        dialog.add_button("Cancel", Gtk.ResponseType.CANCEL)
+        confirm = dialog.add_button("Yes, change architecture", Gtk.ResponseType.OK)
+        confirm.add_css_class("suggested-action")
+        box = dialog.get_content_area()
+        box.set_spacing(12)
+        box.set_margin_top(18)
+        box.set_margin_bottom(18)
+        box.set_margin_start(18)
+        box.set_margin_end(18)
+        box.append(text_label(
+            "You have changed how applications get installed on this PC.",
+            "section-title",
+        ))
+        box.append(text_label(
+            "This live setting affects future SHAPP installs. It does not migrate or remove "
+            "applications already installed. SHAPP will restart so the catalog can be rebuilt "
+            "for the new architecture.",
+            "app-detail",
+        ))
+        dialog.connect("response", self.architecture_confirmation, architecture)
+        dialog.present()
+
+    def architecture_confirmation(
+        self, dialog: Gtk.Dialog, response: int, architecture: str
+    ) -> None:
+        dialog.close()
+        if response != Gtk.ResponseType.OK:
+            self.show_status("Architecture change cancelled. No setting was changed.")
+            return
         self.architecture_mode = architecture
-        self.architecture_source = "SHAPP"
+        self.architecture_source = "SHAPP live autosave"
         save_architecture(architecture)
-        append_log("ARCHITECTURE", "shapp", architecture, "Future installs only")
+        append_log("ARCHITECTURE", "shapp", architecture, "Live setting; SHAPP restart")
         self.update_architecture_state()
-        self.refresh_cart()
+        self.show_status("Architecture saved. Restarting SHAPP with the new catalog mode.")
+        subprocess.Popen(
+            ["bash", "-lc", "sleep 0.5; exec /usr/bin/shai-shapp"],
+            start_new_session=True,
+        )
+        self.get_application().quit()
 
     def catalog_status(self, item: dict[str, object], available: bool) -> str:
         if available:

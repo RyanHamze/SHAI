@@ -3,7 +3,7 @@ set -Eeuo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 readonly ROOT
-readonly VERSION="0.4.0"
+readonly VERSION="0.5.0"
 readonly PACKAGE="shai-installer_${VERSION}_amd64"
 BUILD_ROOT="$(mktemp -d "/tmp/shai-installer-build-${VERSION}.XXXXXX")"
 readonly BUILD_ROOT
@@ -40,6 +40,7 @@ install -m 0755 "$ROOT/installer/src/shai-setup" "$STAGE/usr/bin/shai-setup"
 install -m 0755 "$ROOT/installer/src/shai-shapp" "$STAGE/usr/bin/shai-shapp"
 install -m 0755 "$ROOT/installer/src/shai-shapp-apply" "$STAGE/usr/bin/shai-shapp-apply"
 install -m 0755 "$ROOT/installer/src/shai-shapp-log" "$STAGE/usr/lib/shai-installer/shai-shapp-log"
+install -m 0755 "$ROOT/installer/src/shai-health" "$STAGE/usr/bin/shai-health"
 install -m 0755 "$ROOT/installer/src/shai-wave-a-shell" "$STAGE/usr/bin/shai-wave-a-shell"
 install -m 0755 "$ROOT/installer/src/shai-theme-apply" "$STAGE/usr/bin/shai-theme-apply"
 install -m 0755 "$ROOT/installer/src/shai-theme-reset" "$STAGE/usr/bin/shai-theme-reset"

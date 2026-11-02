@@ -68,7 +68,7 @@ with approval.
 
 ## SHAPP functional draft
 
-Version 0.4.0 replaces the SHAPP handoff shell with a functional GTK draft.
+Version 0.5.0 includes the functional SHAPP manager and SHEALTH dashboard.
 Recommended and Optional tabs contain two audited catalog entries each. The
 Currently Installed tab discovers user-facing APT, Snap, and local desktop
 applications; protected Ubuntu/GNOME components are visible but locked.
@@ -79,3 +79,12 @@ helper revalidates catalog IDs, plan ownership, visible installed applications,
 and protected-package simulations before one exact APT transaction and any
 approved Snap removals. It never runs broad autoremove. Ubuntu App Store only
 launches Ubuntu's existing store in another window.
+
+Architecture is a separate live setting rather than a cart operation. Changing
+it shows a warning, saves only after explicit confirmation, and restarts SHAPP
+so availability can be recalculated for future installs.
+
+SHEALTH (`shai-health`) is a read-only GTK dashboard for cached CPU, RAM, disk,
+interfaces, uptime, local service/firewall signals, Docker details, listening
+ports, threshold events, hourly rollups, energy estimates, and the optional
+Sniffnet launcher. Its local settings affect monitoring only.
