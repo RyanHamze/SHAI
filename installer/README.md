@@ -1,6 +1,6 @@
 # SHAI Setup installer
 
-This directory builds `shai-installer` 0.7.2 for a fresh, fully installed
+This directory builds `shai-installer` 0.8.0 for a fresh, fully installed
 Ubuntu Desktop 26.04 system on `amd64`.
 
 Installing the DEB is inert. It installs the SHAI Setup GUI, exact debloat
@@ -26,8 +26,9 @@ The graphical sequence is:
 
 Setup does not install Docker, Home Assistant, MQTT, Zigbee, Z-Wave, ESPHome,
 Matter, Node-RED, media servers, voice tools, AI runtimes, or model weights.
-Those are selected later in SHAPP. The initial Home, SHAPP, Health, and AIA
-windows are honest handoff shells and do not pretend their later backends exist.
+Those are selected later in SHAPP or AIA. Home remains a handoff shell; SHAPP,
+SHEALTH, and AIA have functional local backends and report unavailable services
+honestly.
 
 The existing terminal assessment path remains available:
 
@@ -68,7 +69,8 @@ with approval.
 
 ## SHAPP functional draft
 
-Version 0.7.2 includes the functional SHAPP manager and SHEALTH dashboard.
+Version 0.8.0 includes the functional SHAPP manager, SHEALTH dashboard, and AIA
+offline-first local model advisor and assistant.
 Recommended and Optional tabs use the audited SHAI catalog. The
 Currently Installed tab discovers user-facing APT, Snap, and local desktop
 applications; protected Ubuntu/GNOME components are visible but locked.

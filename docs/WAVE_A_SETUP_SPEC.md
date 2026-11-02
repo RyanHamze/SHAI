@@ -89,10 +89,9 @@ surfaces, green `#33EE33` accent, GNOME `prefer-dark`, and GNOME green accent.
 Ubuntu OS identity, boot branding, login manager branding, and attribution are
 unchanged.
 
-## Wave A application shells
+## Installed SHAI applications
 
 SHAI Home, SHAPP, SHAI Health, and AIA launchers are present only after setup.
-They are explicitly labeled Wave A shells. They display saved architecture
-state and the next implementation boundary; they do not claim that monitoring,
-app deployment, or AI management exists yet. AIA is installed only when local
-AI was selected.
+Home remains an honest handoff surface. SHAPP manages reviewed application
+changes, SHEALTH provides local monitoring, and AIA manages hardware-aware local
+models and integrations. AIA is installed only when local AI was selected.

@@ -3,7 +3,7 @@ set -Eeuo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 readonly ROOT
-readonly PACKAGE="${1:-$ROOT/dist/shai-installer_0.7.2_amd64.deb}"
+readonly PACKAGE="${1:-$ROOT/dist/shai-installer_0.8.0_amd64.deb}"
 TEST_DIR="$(mktemp -d /tmp/shai-wave-a-package-test.XXXXXX)"
 readonly TEST_DIR
 USER_NAME="$(id -un)"
@@ -26,6 +26,7 @@ python3 -m py_compile \
     "$ROOT/installer/src/shai-network-snapshot" \
     "$ROOT/installer/src/shai-shapp-log" \
     "$ROOT/installer/src/shai-health" \
+    "$ROOT/installer/src/shai-aia" \
     "$ROOT/installer/src/shai-wave-a-shell" \
     "$ROOT/installer/src/shai-appearance" \
     "$ROOT/installer/src/shai-plan-validator" \
@@ -188,6 +189,7 @@ for path in \
     usr/lib/systemd/system/shai-network-snapshot.timer \
     usr/lib/shai-installer/shai-shapp-log \
     usr/bin/shai-health \
+    usr/bin/shai-aia \
     usr/bin/shai-wave-a-shell \
     usr/bin/shai-theme-apply \
     usr/bin/shai-theme-reset \
@@ -210,6 +212,7 @@ for path in \
     usr/share/icons/SHAI/index.theme \
     usr/share/icons/SHAI/scalable/apps/shai-dashboard.svg \
     usr/share/icons/hicolor/scalable/apps/shai-health.svg \
+    usr/share/icons/hicolor/scalable/apps/shai-ai-advisor.svg \
     usr/share/backgrounds/shai/shai-wallpaper-1920x1080.png \
     usr/share/backgrounds/shai/shai-wallpaper-2560x1440.png \
     usr/share/backgrounds/shai/shai-wallpaper-3840x2160.png; do
@@ -309,6 +312,17 @@ grep -Fq "foreground-color '#33EE33'" "$TEST_DIR/root/usr/bin/shai-terminal-them
 grep -Fq "background-color '#000000'" "$TEST_DIR/root/usr/bin/shai-terminal-theme-apply"
 grep -Fq 'Exec=shai-health' \
     "$TEST_DIR/root/usr/lib/shai-installer/assets/launchers/shai-health.desktop"
+grep -Fq 'Exec=shai-aia' \
+    "$TEST_DIR/root/usr/lib/shai-installer/assets/launchers/shai-aia.desktop"
+grep -Fq 'StartupWMClass=com.aabey.shai.AIA' \
+    "$TEST_DIR/root/usr/lib/shai-installer/assets/launchers/shai-aia.desktop"
+grep -Fq 'Clear local chat' "$TEST_DIR/root/usr/bin/shai-aia"
+grep -Fq 'Reset active model' "$TEST_DIR/root/usr/bin/shai-aia"
+grep -Fq 'wget -4 --https-only' "$TEST_DIR/root/usr/bin/shai-aia"
+grep -Fq 'socket.AF_INET' "$TEST_DIR/root/usr/bin/shai-aia"
+grep -Fq 'Application:' "$TEST_DIR/root/usr/bin/shai-aia"
+grep -Fq 'Configuration:' "$TEST_DIR/root/usr/bin/shai-aia"
+grep -Fq 'Integration:' "$TEST_DIR/root/usr/bin/shai-aia"
 grep -Fq 'CREATE TABLE IF NOT EXISTS hourly' "$TEST_DIR/root/usr/bin/shai-health"
 grep -Fq 'Sniffnet: live network monitor' "$TEST_DIR/root/usr/bin/shai-health"
 grep -Fq 'Active source → destination flows' "$TEST_DIR/root/usr/bin/shai-health"

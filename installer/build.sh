@@ -3,7 +3,7 @@ set -Eeuo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 readonly ROOT
-readonly VERSION="0.7.2"
+readonly VERSION="0.8.0"
 readonly PACKAGE="shai-installer_${VERSION}_amd64"
 BUILD_ROOT="$(mktemp -d "/tmp/shai-installer-build-${VERSION}.XXXXXX")"
 readonly BUILD_ROOT
@@ -44,6 +44,7 @@ install -m 0755 "$ROOT/installer/src/shai-stack-apply" "$STAGE/usr/lib/shai-inst
 install -m 0755 "$ROOT/installer/src/shai-network-snapshot" "$STAGE/usr/lib/shai-installer/shai-network-snapshot"
 install -m 0755 "$ROOT/installer/src/shai-shapp-log" "$STAGE/usr/lib/shai-installer/shai-shapp-log"
 install -m 0755 "$ROOT/installer/src/shai-health" "$STAGE/usr/bin/shai-health"
+install -m 0755 "$ROOT/installer/src/shai-aia" "$STAGE/usr/bin/shai-aia"
 install -m 0755 "$ROOT/installer/src/shai-wave-a-shell" "$STAGE/usr/bin/shai-wave-a-shell"
 install -m 0755 "$ROOT/installer/src/shai-theme-apply" "$STAGE/usr/bin/shai-theme-apply"
 install -m 0755 "$ROOT/installer/src/shai-theme-reset" "$STAGE/usr/bin/shai-theme-reset"
@@ -97,6 +98,7 @@ install -m 0644 "$ROOT/branding/SHAI_Brand_v2/shai-welcome-1200x630.png" "$STAGE
 install -m 0644 "$ROOT/branding/theme/share/backgrounds/shai/shai-wallpaper-1920x1080.png" "$STAGE/usr/share/shai/branding/shai-wallpaper-1920x1080.png"
 install -m 0644 "$ROOT/branding/SHAI_Brand_v2/shai-lockup-dark.svg" "$STAGE/usr/share/icons/hicolor/scalable/apps/shai.svg"
 install -m 0644 "$ROOT/branding/theme/share/icons/SHAI/scalable/apps/shai-health.svg" "$STAGE/usr/share/icons/hicolor/scalable/apps/shai-health.svg"
+install -m 0644 "$ROOT/branding/theme/share/icons/SHAI/scalable/apps/shai-ai-advisor.svg" "$STAGE/usr/share/icons/hicolor/scalable/apps/shai-ai-advisor.svg"
 install -m 0644 "$ROOT/branding/theme/share/themes/SHAI/index.theme" "$STAGE/usr/share/themes/SHAI/index.theme"
 install -m 0644 "$ROOT/branding/theme/share/themes/SHAI/gnome-shell/gnome-shell.css" "$STAGE/usr/share/themes/SHAI/gnome-shell/gnome-shell.css"
 install -m 0644 "$ROOT/branding/theme/share/themes/SHAI/gtk-4.0/gtk.css" "$STAGE/usr/share/themes/SHAI/gtk-4.0/gtk.css"

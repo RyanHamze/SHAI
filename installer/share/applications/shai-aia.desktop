@@ -1,10 +1,11 @@
 [Desktop Entry]
 Type=Application
-Name=AIA - AI Advisor
-Comment=Review hardware-aware local AI recommendations
-Exec=shai-wave-a-shell aia
+Name=AIA - Local AI Assistant
+Comment=Manage hardware-aware offline AI models and local assistance
+Exec=shai-aia
 Icon=shai-ai-advisor
 Terminal=false
 Categories=Utility;System;
-Keywords=SHAI;AI;model;advisor;
+Keywords=SHAI;AI;model;assistant;local;offline;
 StartupNotify=true
+StartupWMClass=com.aabey.shai.AIA

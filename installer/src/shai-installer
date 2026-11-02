@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
-readonly SHAI_VERSION="0.7.2"
+readonly SHAI_VERSION="0.8.0"
 readonly LIB_DIR="/usr/lib/shai-installer"
 readonly STATE_DIR="/var/lib/shai-installer"
 readonly LOG_DIR="/var/log/shai-installer"
@@ -543,6 +543,9 @@ install_desktop_launcher() {
     if [[ "$launcher" == shai-health.desktop ]]; then
         install -m 0644 "$LIB_DIR/assets/launchers/$launcher" \
             /usr/share/applications/com.aabey.shai.Health.desktop
+    elif [[ "$launcher" == shai-aia.desktop ]]; then
+        install -m 0644 "$LIB_DIR/assets/launchers/$launcher" \
+            /usr/share/applications/com.aabey.shai.AIA.desktop
     fi
     if [[ -d "$desktop_dir" ]]; then
         run_as_user install -m 0755 \
