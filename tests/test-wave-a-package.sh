@@ -318,7 +318,10 @@ grep -Fq 'Original project and contributors' "$TEST_DIR/root/usr/bin/shai-health
 grep -Fq '4012f85910be03737ca4e4565dfa86b6ce49d7b6573bdd1434ea51bbb5699145' \
     "$TEST_DIR/root/usr/lib/shai-installer/catalog/shai-stack-services.json"
 grep -Fq 'shai-observer' "$TEST_DIR/root/usr/lib/shai-installer/shai-stack-apply"
-! grep -Fq '"Docker"' "$TEST_DIR/root/usr/bin/shai-health"
+if grep -Fq '"Docker"' "$TEST_DIR/root/usr/bin/shai-health"; then
+    printf 'SHEALTH still exposes the internal Docker implementation name.\n' >&2
+    exit 1
+fi
 grep -Fq '"schema": 3' "$TEST_DIR/root/usr/bin/shai-shapp"
 grep -Fq 'remove_container' "$TEST_DIR/root/usr/bin/shai-shapp-apply"
 grep -Fq 'home-assistant:2026.9.3' "$TEST_DIR/root/usr/lib/shai-installer/catalog/shai-stack-services.json"
