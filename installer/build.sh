@@ -3,7 +3,7 @@ set -Eeuo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 readonly ROOT
-readonly VERSION="0.7.1"
+readonly VERSION="0.7.2"
 readonly PACKAGE="shai-installer_${VERSION}_amd64"
 BUILD_ROOT="$(mktemp -d "/tmp/shai-installer-build-${VERSION}.XXXXXX")"
 readonly BUILD_ROOT

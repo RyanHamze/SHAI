@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
-readonly SHAI_VERSION="0.7.1"
+readonly SHAI_VERSION="0.7.2"
 readonly LIB_DIR="/usr/lib/shai-installer"
 readonly STATE_DIR="/var/lib/shai-installer"
 readonly LOG_DIR="/var/log/shai-installer"

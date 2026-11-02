@@ -8,7 +8,7 @@ visibility, open listeners, offline status, Docker health, and energy estimates.
 ## Implemented
 
 - GTK 4 interface retaining the existing `shai-health` heart icon.
-- Health, Disk, Memory, CPU, Network, Docker, Uptime, Energy, Events, and
+- Health, Disk, Memory, CPU, Network, Services, Uptime, Energy, Events, and
   Settings tabs.
 - Cached host sample every 60 seconds by default. UI refreshes read the cache.
 - A root-owned, systemd-sandboxed snapshot collector runs every 30 seconds and
@@ -21,6 +21,8 @@ visibility, open listeners, offline status, Docker health, and energy estimates.
   total checks)`; over 95% is green, 80–95% amber, and below 80% red.
 - The Health summary uses a single-width responsive layout, wraps metric/status
   groups, and permanently disables horizontal scrolling.
+- Disk, RAM, and CPU pages render rolling 24-hour graphs from SHEALTH's local
+  hourly history instead of displaying text-only cached sample rows.
 - One local JSON health/energy summary per completed calendar day, exported on
   the first sample after midnight under `~/.local/state/shai/health/daily/`.
 - Interface counters, every open listening socket, owning process/PID, likely

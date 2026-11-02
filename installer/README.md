@@ -1,6 +1,6 @@
 # SHAI Setup installer
 
-This directory builds `shai-installer` 0.7.1 for a fresh, fully installed
+This directory builds `shai-installer` 0.7.2 for a fresh, fully installed
 Ubuntu Desktop 26.04 system on `amd64`.
 
 Installing the DEB is inert. It installs the SHAI Setup GUI, exact debloat
@@ -68,7 +68,7 @@ with approval.
 
 ## SHAPP functional draft
 
-Version 0.7.1 includes the functional SHAPP manager and SHEALTH dashboard.
+Version 0.7.2 includes the functional SHAPP manager and SHEALTH dashboard.
 Recommended and Optional tabs use the audited SHAI catalog. The
 Currently Installed tab discovers user-facing APT, Snap, and local desktop
 applications; protected Ubuntu/GNOME components are visible but locked.

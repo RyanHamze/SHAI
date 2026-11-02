@@ -3,7 +3,7 @@ set -Eeuo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 readonly ROOT
-readonly PACKAGE="${1:-$ROOT/dist/shai-installer_0.7.1_amd64.deb}"
+readonly PACKAGE="${1:-$ROOT/dist/shai-installer_0.7.2_amd64.deb}"
 TEST_DIR="$(mktemp -d /tmp/shai-wave-a-package-test.XXXXXX)"
 readonly TEST_DIR
 USER_NAME="$(id -un)"
@@ -328,6 +328,13 @@ grep -Fq 'home-assistant:2026.9.3' "$TEST_DIR/root/usr/lib/shai-installer/catalo
 grep -Fq 'Host Ubuntu Environment Summary' "$TEST_DIR/root/usr/bin/shai-health"
 grep -Fq 'negative checks / total checks' "$TEST_DIR/root/usr/bin/shai-health"
 grep -Fq 'Estimated energy usage · rolling 24 hours' "$TEST_DIR/root/usr/bin/shai-health"
+grep -Fq 'CPU utilization · rolling 24 hours' "$TEST_DIR/root/usr/bin/shai-health"
+grep -Fq 'RAM utilization · rolling 24 hours' "$TEST_DIR/root/usr/bin/shai-health"
+grep -Fq 'Disk utilization · rolling 24 hours' "$TEST_DIR/root/usr/bin/shai-health"
+if grep -Fq 'Recent cached samples' "$TEST_DIR/root/usr/bin/shai-health"; then
+    printf 'SHEALTH still renders the obsolete text-only history row.\n' >&2
+    exit 1
+fi
 grep -Fq 'Completed calendar days are exported' "$TEST_DIR/root/usr/bin/shai-health"
 if grep -Eq 'chronyc|prepare_clock_for_online_install|timedatectl' \
     "$TEST_DIR/root/usr/bin/shai-shapp-apply"; then

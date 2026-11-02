@@ -608,6 +608,9 @@ class HealthWindow(Gtk.ApplicationWindow):
 
     def metric_status(self, key: str) -> str:
         value = float(self.sample[key])
+        return self.threshold_status(key, value)
+
+    def threshold_status(self, key: str, value: float) -> str:
         critical = float(self.settings[f"{key}_critical"])
         warning = float(self.settings[f"{key}_warning"])
         return "critical" if value >= critical else "warning" if value >= warning else "healthy"
@@ -701,25 +704,35 @@ class HealthWindow(Gtk.ApplicationWindow):
             inode_used = int(item["inodes_total"]) - int(item["inodes_free"])
             row.append(label(f"{human_bytes(item['used'])} used of {human_bytes(item['total'])} · {item['percent']:.1f}% · {human_bytes(item['free'])} free\nInodes: {inode_used:,} used · {item['inodes_free']:,} free"))
             box.append(row)
-        self.history_rows(box, "disk", "%")
+        self.history_chart(box, "disk", "Disk utilization · rolling 24 hours")
 
     def build_memory(self) -> None:
         box = self.pages["Memory"]; self.clear(box)
         self.heading(box, "Memory", "RAM, swap, and recent pressure proxy. Managed-service limits appear in Services.")
         box.append(label(f"RAM: {self.sample['ram']:.1f}% of {self.sample['ram_mb']} MB\nSwap: {self.sample['swap']:.1f}% of {self.sample['swap_mb']} MB", "panel"))
-        self.history_rows(box, "ram", "%")
+        self.history_chart(box, "ram", "RAM utilization · rolling 24 hours")
 
     def build_cpu(self) -> None:
         box = self.pages["CPU"]; self.clear(box)
-        self.heading(box, "CPU", "Overall utilization, load averages, and per-core counters from the cached sample period.")
+        self.heading(box, "CPU", "Overall utilization, load averages, and locally stored hourly history.")
         loads = os.getloadavg()
         box.append(label(f"CPU: {self.sample['cpu']:.1f}%\nLoad averages: {loads[0]:.2f} · {loads[1]:.2f} · {loads[2]:.2f}\nLogical cores: {os.cpu_count() or 0}", "panel"))
-        self.history_rows(box, "cpu", "%")
+        self.history_chart(box, "cpu", "CPU utilization · rolling 24 hours")
 
-    def history_rows(self, box: Gtk.Box, field: str, unit: str) -> None:
-        rows = list(reversed(self.store.recent(30)))
-        text = "  ".join(dt.datetime.fromtimestamp(row["ts"]).strftime("%H:%M") + f" {row[field]:.1f}{unit}" for row in rows)
-        box.append(label("Recent cached samples\n" + (text or "No history yet"), "panel"))
+    def history_chart(self, box: Gtk.Box, field: str, title: str) -> None:
+        points = [
+            (int(row["hour"]), float(row[f"{field}_max"]))
+            for row in self.store.hourly_last(24)
+            if row[f"{field}_max"] is not None
+        ]
+        box.append(self.chart(
+            points,
+            title,
+            "%",
+            0,
+            100,
+            lambda value: self.threshold_status(field, value),
+        ))
 
     def build_network(self) -> None:
         box = self.pages["Network"]; self.clear(box)
