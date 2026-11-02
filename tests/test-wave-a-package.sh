@@ -3,7 +3,7 @@ set -Eeuo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 readonly ROOT
-readonly PACKAGE="${1:-$ROOT/dist/shai-installer_0.8.0_amd64.deb}"
+readonly PACKAGE="${1:-$ROOT/dist/shai-installer_0.8.3_amd64.deb}"
 TEST_DIR="$(mktemp -d /tmp/shai-wave-a-package-test.XXXXXX)"
 readonly TEST_DIR
 USER_NAME="$(id -un)"
@@ -27,6 +27,7 @@ python3 -m py_compile \
     "$ROOT/installer/src/shai-shapp-log" \
     "$ROOT/installer/src/shai-health" \
     "$ROOT/installer/src/shai-aia" \
+    "$ROOT/installer/src/shai-aia-server" \
     "$ROOT/installer/src/shai-wave-a-shell" \
     "$ROOT/installer/src/shai-appearance" \
     "$ROOT/installer/src/shai-plan-validator" \
@@ -155,6 +156,8 @@ python3 -m py_compile \
     "$TEST_DIR/root/usr/lib/shai-installer/shai-network-snapshot" \
     "$TEST_DIR/root/usr/lib/shai-installer/shai-shapp-log" \
     "$TEST_DIR/root/usr/bin/shai-health" \
+    "$TEST_DIR/root/usr/bin/shai-aia" \
+    "$TEST_DIR/root/usr/bin/shai-aia-server" \
     "$TEST_DIR/root/usr/bin/shai-wave-a-shell" \
     "$TEST_DIR/root/usr/bin/shai-appearance" \
     "$TEST_DIR/root/usr/lib/shai-installer/shai-plan-validator" \
@@ -190,6 +193,8 @@ for path in \
     usr/lib/shai-installer/shai-shapp-log \
     usr/bin/shai-health \
     usr/bin/shai-aia \
+    usr/bin/shai-aia-server \
+    usr/lib/systemd/user/shai-aia-model.service \
     usr/bin/shai-wave-a-shell \
     usr/bin/shai-theme-apply \
     usr/bin/shai-theme-reset \
@@ -318,6 +323,18 @@ grep -Fq 'StartupWMClass=com.aabey.shai.AIA' \
     "$TEST_DIR/root/usr/lib/shai-installer/assets/launchers/shai-aia.desktop"
 grep -Fq 'Clear local chat' "$TEST_DIR/root/usr/bin/shai-aia"
 grep -Fq 'Reset active model' "$TEST_DIR/root/usr/bin/shai-aia"
+grep -Fq '/v1/chat/completions' "$TEST_DIR/root/usr/bin/shai-aia"
+grep -Fq 'Persistent local model ready' "$TEST_DIR/root/usr/bin/shai-aia"
+if grep -Fq '["llama-cli"' "$TEST_DIR/root/usr/bin/shai-aia"; then
+    printf 'AIA must not launch a one-shot llama-cli process for chat.\n' >&2
+    exit 1
+fi
+grep -Fq 'ExecStart=/usr/bin/shai-aia-server' \
+    "$TEST_DIR/root/usr/lib/systemd/user/shai-aia-model.service"
+grep -Fq 'RestrictAddressFamilies=AF_UNIX AF_INET' \
+    "$TEST_DIR/root/usr/lib/systemd/user/shai-aia-model.service"
+grep -Fq -- '--host", "127.0.0.1"' "$TEST_DIR/root/usr/bin/shai-aia-server"
+grep -Fq -- '--api-key-file' "$TEST_DIR/root/usr/bin/shai-aia-server"
 grep -Fq 'wget -4 --https-only' "$TEST_DIR/root/usr/bin/shai-aia"
 grep -Fq 'socket.AF_INET' "$TEST_DIR/root/usr/bin/shai-aia"
 grep -Fq 'Application:' "$TEST_DIR/root/usr/bin/shai-aia"

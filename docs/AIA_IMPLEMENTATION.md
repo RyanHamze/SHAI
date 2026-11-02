@@ -18,8 +18,14 @@ as `/usr/bin/shai-aia` only when the user selects local AI during Setup.
   Ubuntu IPv6.
 - Promotes a newly installed higher-ranked catalog model to active default,
   while retaining installed fallback models.
-- Supports local GGUF import, model switching/removal, single-turn llama.cpp
-  inference, private optional chat history, and daily activity logs.
+- Supports local GGUF import, model switching/removal, private optional chat
+  history, and daily activity logs.
+- Runs the selected model through a persistent per-user systemd service. The
+  model loads during AIA initialization, remains resident after a chat or AIA
+  window closes, and starts again at later desktop logins.
+- Exposes llama.cpp only on `127.0.0.1:11435`, disables its web UI, and requires
+  a private per-user API key. AIA uses the structured chat-completions endpoint
+  so runtime diagnostics never become chat messages.
 - Provides independent Application, Configuration, and Integration statuses for
   every SHAPP recommended integration, plus configure and retest workflows.
 - Uses Home Assistant's token-authenticated REST endpoint, MQTT for Mosquitto

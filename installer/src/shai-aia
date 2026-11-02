@@ -7,12 +7,14 @@ import datetime as dt
 import http.client
 import json
 import os
+import secrets
 import shlex
 import shutil
 import socket
 import subprocess
 import ssl
 import threading
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -32,6 +34,9 @@ DATA_DIR = Path.home() / ".local/share/shai/models"
 CONFIG_FILE = Path.home() / ".config/shai/aia.json"
 LOG_DIR = STATE_DIR / "logs"
 RESERVE_MB = 1024
+SERVER_URL = "http://127.0.0.1:11435"
+SERVER_KEY = STATE_DIR / "server-api-key"
+SERVER_SERVICE = "shai-aia-model.service"
 
 MODELS = (
     {
@@ -194,6 +199,20 @@ def audit(action: str, detail: str) -> None:
     path.chmod(0o600)
 
 
+def ensure_server_key() -> str:
+    STATE_DIR.mkdir(parents=True, exist_ok=True, mode=0o700)
+    STATE_DIR.chmod(0o700)
+    try:
+        key = SERVER_KEY.read_text(encoding="utf-8").strip()
+    except OSError:
+        key = ""
+    if not key:
+        key = secrets.token_urlsafe(32)
+        SERVER_KEY.write_text(key + "\n", encoding="utf-8")
+    SERVER_KEY.chmod(0o600)
+    return key
+
+
 def memory_mb() -> tuple[int, int]:
     values: dict[str, int] = {}
     for line in read_text("/proc/meminfo").splitlines():
@@ -291,6 +310,7 @@ class AIAWindow(Gtk.ApplicationWindow):
         self.chat_messages: list[tuple[str, str]] = []
         self.last_installed = {str(item["id"]) for item in installed_catalog_models()}
         self.busy = False
+        self.ensure_model_service()
 
         root = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
         self.set_child(root)
@@ -387,6 +407,31 @@ class AIAWindow(Gtk.ApplicationWindow):
             return Path(str(active["path"]))
         return model_path(active)
 
+    def ensure_model_service(self, restart: bool = False) -> None:
+        active_path = self.active_path()
+        if not active_path or not shutil.which("llama-server"):
+            run(["systemctl", "--user", "disable", "--now", SERVER_SERVICE], timeout=8)
+            return
+        ensure_server_key()
+        run(["systemctl", "--user", "daemon-reload"], timeout=8)
+        run(["systemctl", "--user", "enable", SERVER_SERVICE], timeout=8)
+        action = "restart" if restart else "start"
+        code, output = run(["systemctl", "--user", action, SERVER_SERVICE], timeout=12)
+        audit("model-service", f"{action} | {'ok' if code == 0 else output}")
+
+    def server_ready(self) -> bool:
+        if not self.active_path():
+            return False
+        request = urllib.request.Request(
+            SERVER_URL + "/health",
+            headers={"Authorization": f"Bearer {ensure_server_key()}"},
+        )
+        try:
+            with urllib.request.urlopen(request, timeout=2) as response:
+                return response.status == 200
+        except (OSError, urllib.error.URLError):
+            return False
+
     def update_active_header(self) -> None:
         active = self.active_model()
         self.active_header.set_text(f"Active: {active['name']}" if active else "Deterministic mode")
@@ -423,7 +468,12 @@ class AIAWindow(Gtk.ApplicationWindow):
         spacer = Gtk.Box()
         spacer.set_hexpand(True)
         status.append(spacer)
-        status.append(label("Offline inference" if active else "No model loaded", "muted"))
+        status.append(label(
+            "Persistent local model ready" if active and self.server_ready()
+            else "Persistent model service loading" if active
+            else "No model loaded",
+            "muted",
+        ))
         box.append(status)
 
         self.chat_view = Gtk.TextView()
@@ -474,12 +524,13 @@ class AIAWindow(Gtk.ApplicationWindow):
         self.chat_messages.append(("You", prompt))
         self.render_chat()
         active_path = self.active_path()
-        if active_path and shutil.which("llama-cli"):
+        if active_path and shutil.which("llama-server"):
+            self.ensure_model_service()
             self.busy = True
             self.send_button.set_sensitive(False)
             self.chat_messages.append(("AIA", "Thinking locally..."))
             self.render_chat()
-            threading.Thread(target=self.run_inference, args=(prompt, active_path), daemon=True).start()
+            threading.Thread(target=self.run_inference, args=(prompt,), daemon=True).start()
         else:
             self.chat_messages.append(("AIA", self.deterministic_answer(prompt)))
             self.render_chat()
@@ -515,20 +566,48 @@ class AIAWindow(Gtk.ApplicationWindow):
             "from Models, or ask about detected hardware, model recommendations, SHAI status, or Home Assistant."
         )
 
-    def run_inference(self, prompt: str, path: Path) -> None:
-        context = "\n".join(f"{role}: {text}" for role, text in self.chat_messages[-6:-1])
+    def run_inference(self, prompt: str) -> None:
         system = (
             "You are AIA, the offline SHAI local assistant. Be concise and honest. Never claim to have "
             "executed commands, changed the host, controlled devices, or accessed the internet. Propose actions "
             "for explicit user approval. Ubuntu remains the host OS."
         )
-        full_prompt = f"System: {system}\n{context}\nUser: {prompt}\nAssistant:"
-        code, output = run([
-            "llama-cli", "-m", str(path), "-p", full_prompt,
-            "-n", "256", "--temp", "0.4", "--no-display-prompt",
-            "--single-turn", "--simple-io",
-        ], timeout=180)
-        answer = output.strip() if code == 0 and output.strip() else f"Local inference failed: {output or 'unknown error'}"
+        deadline = time.monotonic() + 90
+        while time.monotonic() < deadline and not self.server_ready():
+            time.sleep(1)
+        if not self.server_ready():
+            GLib.idle_add(self.finish_inference, "The persistent local model service did not become ready. Check AIA Activity for its service status.")
+            return
+        messages: list[dict[str, str]] = [{"role": "system", "content": system}]
+        for role, text in self.chat_messages[-10:-2]:
+            if text == "Thinking locally...":
+                continue
+            messages.append({"role": "user" if role == "You" else "assistant", "content": text})
+        messages.append({"role": "user", "content": prompt})
+        payload = json.dumps({
+            "model": "local",
+            "messages": messages,
+            "max_tokens": 256,
+            "temperature": 0.4,
+            "stream": False,
+        }).encode("utf-8")
+        request = urllib.request.Request(
+            SERVER_URL + "/v1/chat/completions",
+            data=payload,
+            headers={
+                "Authorization": f"Bearer {ensure_server_key()}",
+                "Content-Type": "application/json",
+            },
+            method="POST",
+        )
+        try:
+            with urllib.request.urlopen(request, timeout=180) as response:
+                result = json.loads(response.read().decode("utf-8"))
+            answer = str(result["choices"][0]["message"]["content"]).strip()
+            if not answer:
+                raise ValueError("model returned an empty response")
+        except (OSError, ValueError, KeyError, IndexError, json.JSONDecodeError, urllib.error.URLError) as exc:
+            answer = f"Local inference failed: {exc}"
         GLib.idle_add(self.finish_inference, answer)
 
     def finish_inference(self, answer: str) -> bool:
@@ -611,6 +690,7 @@ class AIAWindow(Gtk.ApplicationWindow):
     def make_default(self, model: dict[str, object]) -> None:
         self.config["active_model"] = model["id"]
         save_config(self.config)
+        self.ensure_model_service(restart=True)
         audit("default-model", str(model["name"]))
         self.update_active_header()
         self.build_models()
@@ -686,6 +766,7 @@ sleep 5
             remaining = installed_catalog_models()
             self.config["active_model"] = max(remaining, key=lambda item: int(item["rank"]))["id"] if remaining else ""
             save_config(self.config)
+        self.ensure_model_service(restart=True)
         audit("model-removed", str(model["id"]))
         self.update_active_header()
         self.build_models()
@@ -718,6 +799,7 @@ sleep 5
                 self.config["imported_models"] = imported
                 self.config["active_model"] = item["id"]
                 save_config(self.config)
+                self.ensure_model_service(restart=True)
                 audit("model-imported", str(source.resolve()))
                 self.update_active_header()
                 self.build_models()
@@ -1147,6 +1229,7 @@ sleep 5
     def reset_model(self, _button: Gtk.Button) -> None:
         self.config["active_model"] = ""
         save_config(self.config)
+        self.ensure_model_service()
         audit("model-reset", "Active model selection reset; model files retained")
         self.update_active_header()
         self.build_settings()
@@ -1159,6 +1242,7 @@ sleep 5
             promoted = max(candidates, key=lambda item: int(item["rank"]))
             self.config["active_model"] = promoted["id"]
             save_config(self.config)
+            self.ensure_model_service(restart=True)
             audit("model-auto-promoted", str(promoted["name"]))
             self.update_active_header()
             if self.stack.get_visible_child_name() == "Models":

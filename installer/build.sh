@@ -3,7 +3,7 @@ set -Eeuo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 readonly ROOT
-readonly VERSION="0.8.0"
+readonly VERSION="0.8.3"
 readonly PACKAGE="shai-installer_${VERSION}_amd64"
 BUILD_ROOT="$(mktemp -d "/tmp/shai-installer-build-${VERSION}.XXXXXX")"
 readonly BUILD_ROOT
@@ -25,6 +25,7 @@ install -d \
     "$STAGE/usr/lib/shai-installer/assets" \
     "$STAGE/usr/lib/shai-installer/assets/launchers" \
     "$STAGE/usr/lib/systemd/system" \
+    "$STAGE/usr/lib/systemd/user" \
     "$STAGE/usr/share/applications" \
     "$STAGE/usr/share/doc/shai-installer" \
     "$STAGE/usr/share/icons/hicolor/scalable/apps" \
@@ -45,6 +46,7 @@ install -m 0755 "$ROOT/installer/src/shai-network-snapshot" "$STAGE/usr/lib/shai
 install -m 0755 "$ROOT/installer/src/shai-shapp-log" "$STAGE/usr/lib/shai-installer/shai-shapp-log"
 install -m 0755 "$ROOT/installer/src/shai-health" "$STAGE/usr/bin/shai-health"
 install -m 0755 "$ROOT/installer/src/shai-aia" "$STAGE/usr/bin/shai-aia"
+install -m 0755 "$ROOT/installer/src/shai-aia-server" "$STAGE/usr/bin/shai-aia-server"
 install -m 0755 "$ROOT/installer/src/shai-wave-a-shell" "$STAGE/usr/bin/shai-wave-a-shell"
 install -m 0755 "$ROOT/installer/src/shai-theme-apply" "$STAGE/usr/bin/shai-theme-apply"
 install -m 0755 "$ROOT/installer/src/shai-theme-reset" "$STAGE/usr/bin/shai-theme-reset"
@@ -61,6 +63,7 @@ install -m 0644 "$ROOT/installer/catalog/shapp-apps.json" "$STAGE/usr/lib/shai-i
 install -m 0644 "$ROOT/installer/catalog/shai-stack-services.json" "$STAGE/usr/lib/shai-installer/catalog/shai-stack-services.json"
 install -m 0644 "$ROOT/installer/systemd/shai-network-snapshot.service" "$STAGE/usr/lib/systemd/system/shai-network-snapshot.service"
 install -m 0644 "$ROOT/installer/systemd/shai-network-snapshot.timer" "$STAGE/usr/lib/systemd/system/shai-network-snapshot.timer"
+install -m 0644 "$ROOT/installer/systemd/shai-aia-model.service" "$STAGE/usr/lib/systemd/user/shai-aia-model.service"
 
 for file in \
     01-applications.list \
