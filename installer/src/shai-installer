@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
-readonly SHAI_VERSION="0.5.1"
+readonly SHAI_VERSION="0.6.4"
 readonly LIB_DIR="/usr/lib/shai-installer"
 readonly STATE_DIR="/var/lib/shai-installer"
 readonly LOG_DIR="/var/log/shai-installer"
@@ -738,6 +738,8 @@ fi
 
 install_validated_policy
 apply_wave_a_branding_and_choices
+systemctl daemon-reload
+systemctl enable --now shai-network-snapshot.timer
 clear_expected_removed_unit_failures
 health_check
 "$LIB_DIR/shai-system-summary" "$TARGET_USER" "$STATE_DIR"

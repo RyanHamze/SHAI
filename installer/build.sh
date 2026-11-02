@@ -3,7 +3,7 @@ set -Eeuo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 readonly ROOT
-readonly VERSION="0.5.1"
+readonly VERSION="0.6.4"
 readonly PACKAGE="shai-installer_${VERSION}_amd64"
 BUILD_ROOT="$(mktemp -d "/tmp/shai-installer-build-${VERSION}.XXXXXX")"
 readonly BUILD_ROOT
@@ -24,6 +24,7 @@ install -d \
     "$STAGE/usr/lib/shai-installer/catalog" \
     "$STAGE/usr/lib/shai-installer/assets" \
     "$STAGE/usr/lib/shai-installer/assets/launchers" \
+    "$STAGE/usr/lib/systemd/system" \
     "$STAGE/usr/share/applications" \
     "$STAGE/usr/share/doc/shai-installer" \
     "$STAGE/usr/share/icons/hicolor/scalable/apps" \
@@ -39,6 +40,8 @@ install -m 0755 "$ROOT/installer/src/shai-installer" "$STAGE/usr/bin/shai-instal
 install -m 0755 "$ROOT/installer/src/shai-setup" "$STAGE/usr/bin/shai-setup"
 install -m 0755 "$ROOT/installer/src/shai-shapp" "$STAGE/usr/bin/shai-shapp"
 install -m 0755 "$ROOT/installer/src/shai-shapp-apply" "$STAGE/usr/bin/shai-shapp-apply"
+install -m 0755 "$ROOT/installer/src/shai-stack-apply" "$STAGE/usr/lib/shai-installer/shai-stack-apply"
+install -m 0755 "$ROOT/installer/src/shai-network-snapshot" "$STAGE/usr/lib/shai-installer/shai-network-snapshot"
 install -m 0755 "$ROOT/installer/src/shai-shapp-log" "$STAGE/usr/lib/shai-installer/shai-shapp-log"
 install -m 0755 "$ROOT/installer/src/shai-health" "$STAGE/usr/bin/shai-health"
 install -m 0755 "$ROOT/installer/src/shai-wave-a-shell" "$STAGE/usr/bin/shai-wave-a-shell"
@@ -53,6 +56,9 @@ install -m 0755 "$ROOT/tools/configure_manual_updates.sh" "$STAGE/usr/lib/shai-i
 install -m 0755 "$ROOT/tools/restore_automatic_updates.sh" "$STAGE/usr/lib/shai-installer/restore-automatic-updates"
 install -m 0644 "$ROOT/debloat/PROTECTED_PACKAGES.regex" "$STAGE/usr/lib/shai-installer/PROTECTED_PACKAGES.regex"
 install -m 0644 "$ROOT/installer/catalog/shapp-apps.json" "$STAGE/usr/lib/shai-installer/catalog/shapp-apps.json"
+install -m 0644 "$ROOT/installer/catalog/shai-stack-services.json" "$STAGE/usr/lib/shai-installer/catalog/shai-stack-services.json"
+install -m 0644 "$ROOT/installer/systemd/shai-network-snapshot.service" "$STAGE/usr/lib/systemd/system/shai-network-snapshot.service"
+install -m 0644 "$ROOT/installer/systemd/shai-network-snapshot.timer" "$STAGE/usr/lib/systemd/system/shai-network-snapshot.timer"
 
 for file in \
     01-applications.list \

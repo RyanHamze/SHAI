@@ -27,6 +27,7 @@ DAILY = STATE / "daily"
 CONFIG = Path.home() / ".config/shai/health.json"
 DB = STATE / "health.sqlite3"
 BRAND = Path("/usr/share/shai/branding/shai-lockup-dark.svg")
+NETWORK_SNAPSHOT = Path("/run/shai/network-snapshot.json")
 DEFAULTS = {
     "sample_interval": 60,
     "live_refresh": 5,
@@ -728,32 +729,74 @@ class HealthWindow(Gtk.ApplicationWindow):
 
     def build_network(self) -> None:
         box = self.pages["Network"]; self.clear(box)
-        self.heading(box, "Network activity", "Socket collection runs only while this tab is open. Ports identify likely services, not payload contents.")
+        self.heading(box, "Network activity", "A read-only system service maps host and container sockets to owners and likely purposes. It identifies endpoints and metadata, never payload contents.")
         for item in self.sample["interfaces"]:
             button = Gtk.Button(label=f"{item['name']}  ↓ {human_bytes(item['rx'])}  ↑ {human_bytes(item['tx'])}  errors {item['rx_errors'] + item['tx_errors']}  drops {item['rx_drop'] + item['tx_drop']}")
             button.add_css_class("row"); box.append(button)
-        if self.settings["socket_collection"]:
-            rc, output, error = run(["ss", "-tunap"], 5)
-            socket_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4); socket_box.add_css_class("panel")
-            socket_box.append(label("Live sockets", "section-title", False))
-            if rc:
-                socket_box.append(label(error or "Socket ownership is unavailable without additional permission.", "warning"))
+        try:
+            snapshot = json.loads(NETWORK_SNAPSHOT.read_text(encoding="utf-8"))
+            generated = int(snapshot.get("generated_at", 0))
+            age = max(0, int(time.time()) - generated)
+            connections = snapshot.get("connections", [])
+            if not isinstance(connections, list):
+                raise ValueError("connections is not a list")
+            freshness = "healthy" if age <= 90 else "warning"
+            box.append(label(f"Network ownership snapshot: {age} seconds old", freshness, False))
+
+            containers = snapshot.get("containers", [])
+            if isinstance(containers, list) and containers:
+                network_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4); network_box.add_css_class("panel")
+                network_box.append(label("Container networks and addresses", "section-title", False))
+                for container in containers:
+                    networks = container.get("networks", {})
+                    details = ", ".join(
+                        f"{name}: {values.get('ip') or 'no address'} (gateway {values.get('gateway') or 'n/a'})"
+                        for name, values in networks.items()
+                    ) or "no attached network"
+                    network_box.append(label(
+                        f"{container.get('name', 'unknown')} · {container.get('status', 'unknown')} · {details}",
+                        "muted", False,
+                    ))
+                box.append(network_box)
+
+            listeners = [row for row in connections if str(row.get("state", "")).upper() in {"LISTEN", "UNCONN"}]
+            listener_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4); listener_box.add_css_class("panel")
+            listener_box.append(label(f"Open listening ports and owners ({len(listeners)})", "section-title", False))
+            if listeners:
+                for row in listeners[:150]:
+                    listener_box.append(label(
+                        f"{row.get('context')} · {str(row.get('protocol')).upper()} · {row.get('source')}\n"
+                        f"Owner: {row.get('owner')} (PID {row.get('pid') or 'n/a'}) · "
+                        f"Purpose: {row.get('service')} — {row.get('purpose')}",
+                        "muted",
+                    ))
             else:
-                lines = output.splitlines()
-                for line_text in lines[:101]: socket_box.append(label(line_text, "muted", False))
-                if len(lines) > 101: socket_box.append(label("More sockets omitted from this view.", "muted"))
-            box.append(socket_box)
-        else:
-            box.append(label("Per-socket collection is disabled in Settings.", "muted"))
-        rc, listeners, error = run(["ss", "-lntup"], 5)
-        listener_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4); listener_box.add_css_class("panel")
-        listener_box.append(label("Open listening ports and owners", "section-title", False))
-        listener_box.append(label(
-            listeners if rc == 0 else error or "Listener ownership is unavailable.",
-            "muted",
-            False,
-        ))
-        box.append(listener_box)
+                listener_box.append(label("No listening sockets were reported.", "muted"))
+            box.append(listener_box)
+
+            flows = [row for row in connections if str(row.get("state", "")).upper() not in {"LISTEN", "UNCONN"}]
+            flow_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4); flow_box.add_css_class("panel")
+            flow_box.append(label(f"Active source → destination flows ({len(flows)})", "section-title", False))
+            if flows:
+                for row in flows[:200]:
+                    flow_box.append(label(
+                        f"{row.get('context')} · {str(row.get('protocol')).upper()} {row.get('state')}\n"
+                        f"{row.get('source')} → {row.get('destination')} · Owner: {row.get('owner')} "
+                        f"(PID {row.get('pid') or 'n/a'})\n"
+                        f"Likely destination service: {row.get('service')} — {row.get('purpose')}",
+                        "muted",
+                    ))
+            else:
+                flow_box.append(label("No active source-to-destination flows were reported.", "muted"))
+            box.append(flow_box)
+        except (OSError, UnicodeError, json.JSONDecodeError, ValueError, TypeError) as exc:
+            fallback = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4); fallback.add_css_class("panel")
+            fallback.append(label("Network ownership snapshot unavailable", "section-title", False))
+            fallback.append(label(f"The privileged read-only collector has not produced usable data yet: {exc}", "warning"))
+            if self.settings["socket_collection"]:
+                rc, output, error = run(["ss", "-tunap"], 5)
+                fallback.append(label(output if rc == 0 else error or "Socket data unavailable.", "muted", False))
+            box.append(fallback)
         self.sniffnet_card(box)
 
     def sniffnet_card(self, box: Gtk.Box) -> None:

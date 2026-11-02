@@ -1,0 +1,288 @@
+#!/usr/bin/env python3
+"""Apply a validated SHAI Advanced Compose service selection as root."""
+
+from __future__ import annotations
+
+import argparse
+import json
+import os
+import platform
+import secrets
+import shutil
+import subprocess
+import sys
+from pathlib import Path
+
+
+CATALOG = Path("/usr/lib/shai-installer/catalog/shai-stack-services.json")
+ETC = Path("/etc/shai")
+STACK = ETC / "stack"
+SECRETS = ETC / "secrets"
+DATA = Path("/var/lib/shai/stack")
+STATE = DATA / "installed.json"
+REGISTRY = ETC / "service-registry.json"
+LOCK = STACK / "images.lock.json"
+SUPPORTED = {"mosquitto", "home-assistant", "zigbee2mqtt"}
+
+
+def run(args: list[str], *, input_text: str | None = None, capture: bool = False) -> str:
+    print("+", " ".join(args), flush=True)
+    result = subprocess.run(
+        args, check=True, text=True, input=input_text,
+        stdout=subprocess.PIPE if capture else None,
+    )
+    return result.stdout.strip() if capture else ""
+
+
+def load_catalog() -> dict[str, dict[str, object]]:
+    data = json.loads(CATALOG.read_text(encoding="utf-8"))
+    return data["services"]
+
+
+def installed() -> set[str]:
+    try:
+        data = json.loads(STATE.read_text(encoding="utf-8"))
+        return set(data.get("services", [])) & SUPPORTED
+    except (OSError, json.JSONDecodeError, AttributeError):
+        return set()
+
+
+def hardware_assessment(selected: set[str], catalog: dict[str, dict[str, object]]) -> None:
+    logical = os.cpu_count() or 0
+    machine = platform.machine().lower()
+    mem_kb = 0
+    for line in Path("/proc/meminfo").read_text(encoding="utf-8").splitlines():
+        if line.startswith("MemTotal:"):
+            mem_kb = int(line.split()[1]); break
+    total_ram = mem_kb // 1024
+    free_disk = shutil.disk_usage("/var/lib").free // (1024 * 1024)
+    workload_ram = sum(int(catalog[item]["minimum_ram_mb"]) for item in selected)
+    workload_disk = sum(int(catalog[item]["minimum_disk_mb"]) for item in selected)
+    required_ram = 2048 + workload_ram
+    required_disk = 10240 + workload_disk
+    failures = []
+    if machine not in {"x86_64", "amd64", "aarch64", "arm64"}:
+        failures.append(f"architecture {machine} is not in SHAI's tested 64-bit set")
+    if logical < 2:
+        failures.append(f"{logical} logical CPU detected; at least 2 required")
+    if total_ram < required_ram:
+        failures.append(f"{total_ram} MB RAM detected; selected workload plus Ubuntu reserve requires {required_ram} MB")
+    if free_disk < required_disk:
+        failures.append(f"{free_disk} MB free on /var/lib; selected workload plus safety reserve requires {required_disk} MB")
+    print("\nSHAI Advanced hardware assessment")
+    print(f"  CPU: {logical} logical cores ({machine})")
+    print(f"  RAM: {total_ram} MB installed; {required_ram} MB selected-workload requirement")
+    print(f"  Disk: {free_disk} MB free; {required_disk} MB selected-workload requirement")
+    if failures:
+        print("\nNOT SUFFICIENT HARDWARE RESOURCES FOR THE SELECTED DOCKER WORKLOAD", file=sys.stderr)
+        for failure in failures:
+            print(f"  FAIL: {failure}", file=sys.stderr)
+        raise SystemExit(3)
+    print("  Overall: PASS")
+
+
+def install_engine() -> None:
+    if shutil.which("docker"):
+        run(["docker", "version"])
+        run(["docker", "compose", "version"])
+        return
+    conflicts = [
+        package for package in ("docker.io", "docker-compose", "docker-compose-v2", "podman-docker", "containerd", "runc")
+        if subprocess.run(["dpkg-query", "-W", "-f=${db:Status-Abbrev}", package],
+                          check=False, text=True, stdout=subprocess.PIPE,
+                          stderr=subprocess.DEVNULL).stdout.startswith("ii")
+    ]
+    if conflicts:
+        raise SystemExit(
+            "Existing container packages require a manual migration review before installing "
+            f"Docker Engine: {', '.join(conflicts)}"
+        )
+    run(["apt-get", "update"])
+    run(["apt-get", "-y", "install", "ca-certificates", "curl"])
+    Path("/etc/apt/keyrings").mkdir(parents=True, exist_ok=True)
+    run(["curl", "-fsSL", "https://download.docker.com/linux/ubuntu/gpg", "-o", "/etc/apt/keyrings/docker.asc"])
+    Path("/etc/apt/keyrings/docker.asc").chmod(0o644)
+    os_release = {}
+    for line in Path("/etc/os-release").read_text(encoding="utf-8").splitlines():
+        if "=" in line:
+            key, value = line.split("=", 1); os_release[key] = value.strip('"')
+    codename = os_release.get("VERSION_CODENAME", "")
+    if not codename:
+        raise SystemExit("Ubuntu VERSION_CODENAME is unavailable")
+    architecture = run(["dpkg", "--print-architecture"], capture=True)
+    source = Path("/etc/apt/sources.list.d/docker.sources")
+    source.write_text(
+        "Types: deb\nURIs: https://download.docker.com/linux/ubuntu\n"
+        f"Suites: {codename}\nComponents: stable\nArchitectures: {architecture}\n"
+        "Signed-By: /etc/apt/keyrings/docker.asc\n",
+        encoding="utf-8",
+    )
+    source.chmod(0o644)
+    run(["apt-get", "update"])
+    run(["apt-get", "-y", "install", "docker-ce", "docker-ce-cli", "containerd.io",
+         "docker-buildx-plugin", "docker-compose-plugin"])
+    run(["systemctl", "enable", "--now", "docker.service", "containerd.service"])
+    run(["docker", "version"]); run(["docker", "compose", "version"])
+
+
+def serial_device() -> str:
+    devices = sorted(Path("/dev/serial/by-id").glob("*")) if Path("/dev/serial/by-id").is_dir() else []
+    if len(devices) != 1:
+        found = ", ".join(str(item) for item in devices) or "none"
+        raise SystemExit(
+            "Zigbee2MQTT requires exactly one reviewed stable /dev/serial/by-id device for this "
+            f"initial backend; detected: {found}"
+        )
+    return str(devices[0])
+
+
+def ensure_mqtt_credentials(image: str) -> tuple[str, str]:
+    credentials = SECRETS / "mqtt-credentials.json"
+    passwd = DATA / "mosquitto/config/passwd"
+    if credentials.exists() and passwd.exists():
+        data = json.loads(credentials.read_text(encoding="utf-8"))
+        return str(data["username"]), str(data["password"])
+    username, password = "shai", secrets.token_urlsafe(24)
+    credentials.write_text(json.dumps({"username": username, "password": password}, indent=2) + "\n", encoding="utf-8")
+    credentials.chmod(0o600)
+    passwd.parent.mkdir(parents=True, exist_ok=True)
+    run(["docker", "run", "--rm", "-i", "-v", f"{passwd.parent}:/work", image,
+         "sh", "-c", "read -r password; mosquitto_passwd -b -c /work/passwd shai \"$password\""],
+        input_text=password + "\n")
+    passwd.chmod(0o644)
+    return username, password
+
+
+def compose_text(selected: set[str], catalog: dict[str, dict[str, object]], zigbee: str | None) -> str:
+    lines = ["name: shai", "services:"]
+    if "mosquitto" in selected:
+        lines += [
+            "  mosquitto:", f"    image: {catalog['mosquitto']['image']}",
+            "    container_name: shai-mosquitto", "    restart: unless-stopped",
+            "    security_opt: [no-new-privileges:true]",
+            "    volumes:", "      - /var/lib/shai/stack/mosquitto/config:/mosquitto/config:ro",
+            "      - /var/lib/shai/stack/mosquitto/data:/mosquitto/data",
+            "      - /var/lib/shai/stack/mosquitto/log:/mosquitto/log",
+            "    networks: [shai-automation]", "    profiles: [mosquitto]",
+        ]
+    if "home-assistant" in selected:
+        lines += [
+            "  home-assistant:", f"    image: {catalog['home-assistant']['image']}",
+            "    container_name: shai-home-assistant", "    restart: unless-stopped",
+            "    stop_grace_period: 60s", "    security_opt: [no-new-privileges:true]",
+            "    environment:", "      TZ: ${TZ}",
+            "    volumes:", "      - /var/lib/shai/stack/homeassistant:/config",
+            "    ports:", "      - 127.0.0.1:8123:8123",
+            "    networks: [shai-automation, shai-lan]", "    profiles: [home-assistant]",
+        ]
+    if "zigbee2mqtt" in selected and zigbee:
+        lines += [
+            "  zigbee2mqtt:", f"    image: {catalog['zigbee2mqtt']['image']}",
+            "    container_name: shai-zigbee2mqtt", "    restart: unless-stopped",
+            "    security_opt: [no-new-privileges:true]",
+            "    environment:", "      TZ: ${TZ}",
+            "    volumes:", "      - /var/lib/shai/stack/zigbee2mqtt:/app/data",
+            "    devices:", f"      - {zigbee}:/dev/ttyZigbee",
+            "    ports:", "      - 127.0.0.1:8080:8080",
+            "    networks: [shai-automation]", "    profiles: [zigbee2mqtt]",
+        ]
+    lines += [
+        "networks:",
+        "  shai-automation:",
+        "    name: shai-automation",
+        "    driver: bridge",
+        "    internal: true",
+        "  shai-lan:",
+        "    name: shai-lan",
+        "    driver: bridge",
+    ]
+    return "\n".join(lines) + "\n"
+
+
+def write_configuration(selected: set[str], catalog: dict[str, dict[str, object]]) -> list[str]:
+    for path in (ETC, STACK, SECRETS, DATA):
+        path.mkdir(parents=True, exist_ok=True)
+    SECRETS.chmod(0o700); STACK.chmod(0o750)
+    for service in SUPPORTED:
+        (DATA / service.replace("-", "")).mkdir(parents=True, exist_ok=True)
+    zigbee = serial_device() if "zigbee2mqtt" in selected else None
+    pulled = []
+    for item in sorted(selected):
+        image = str(catalog[item]["image"]); run(["docker", "pull", image]); pulled.append(image)
+    if "mosquitto" in selected:
+        username, password = ensure_mqtt_credentials(str(catalog["mosquitto"]["image"]))
+        config = DATA / "mosquitto/config/mosquitto.conf"
+        config.write_text(
+            "listener 1883 0.0.0.0\nallow_anonymous false\n"
+            "password_file /mosquitto/config/passwd\npersistence true\n"
+            "persistence_location /mosquitto/data/\nlog_dest file /mosquitto/log/mosquitto.log\n",
+            encoding="utf-8",
+        ); config.chmod(0o644)
+        if "zigbee2mqtt" in selected:
+            zconfig = DATA / "zigbee2mqtt/configuration.yaml"
+            zconfig.write_text(
+                "homeassistant: false\npermit_join: false\nfrontend:\n  enabled: true\n  port: 8080\n"
+                f"mqtt:\n  server: mqtt://mosquitto:1883\n  user: {username}\n  password: {password}\n"
+                "serial:\n  port: /dev/ttyZigbee\n",
+                encoding="utf-8",
+            ); zconfig.chmod(0o600)
+    timezone = Path("/etc/timezone").read_text(encoding="utf-8").strip() if Path("/etc/timezone").exists() else "UTC"
+    (STACK / ".env").write_text(f"TZ={timezone}\n", encoding="utf-8"); (STACK / ".env").chmod(0o600)
+    (STACK / "compose.yaml").write_text(compose_text(selected, catalog, zigbee), encoding="utf-8")
+    (STACK / "compose.yaml").chmod(0o640)
+    locks = {}
+    for image in pulled:
+        output = run(["docker", "image", "inspect", image, "--format", "{{json .RepoDigests}}"], capture=True)
+        try: locks[image] = json.loads(output)
+        except json.JSONDecodeError: locks[image] = []
+    LOCK.write_text(json.dumps({"schema": 1, "images": locks}, indent=2) + "\n", encoding="utf-8"); LOCK.chmod(0o640)
+    services = []
+    for item in sorted(selected):
+        entry = catalog[item]
+        networks = ["shai-automation", "shai-lan"] if item == "home-assistant" else ["shai-automation"]
+        services.append({"id": item, "name": entry["name"], "container": f"shai-{item}",
+                         "purpose": f"SHAI managed {entry['name']}", "ports": entry["ports"],
+                         "networks": networks})
+    REGISTRY.write_text(json.dumps({"schema": 1, "services": services}, indent=2) + "\n", encoding="utf-8")
+    REGISTRY.chmod(0o644)
+    return [item for item in sorted(selected)]
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--install", default="")
+    parser.add_argument("--remove", default="")
+    parser.add_argument("--assess", action="store_true", help="assess only; make no changes")
+    args = parser.parse_args()
+    if os.geteuid() != 0:
+        raise SystemExit("run through SHAPP's visible sudo approval terminal")
+    requested_install = {item for item in args.install.split(",") if item}
+    requested_remove = {item for item in args.remove.split(",") if item}
+    if not requested_install <= SUPPORTED or not requested_remove <= SUPPORTED:
+        raise SystemExit("unsupported SHAI stack service ID")
+    final = (installed() | requested_install) - requested_remove
+    if "zigbee2mqtt" in final:
+        final.add("mosquitto")
+    catalog = load_catalog()
+    if final:
+        hardware_assessment(final, catalog)
+    if args.assess:
+        print("Assessment only. No Docker, package, service, or file changes were made.")
+        return 0
+    if final:
+        install_engine(); profiles = write_configuration(final, catalog)
+        command = ["docker", "compose", "--project-directory", str(STACK)]
+        for profile in profiles: command += ["--profile", profile]
+        run([*command, "up", "-d", "--remove-orphans"])
+    elif shutil.which("docker") and (STACK / "compose.yaml").exists():
+        run(["docker", "compose", "--project-directory", str(STACK), "down"])
+    DATA.mkdir(parents=True, exist_ok=True)
+    STATE.write_text(json.dumps({"schema": 1, "services": sorted(final)}, indent=2) + "\n", encoding="utf-8")
+    STATE.chmod(0o644)
+    run(["systemctl", "enable", "--now", "shai-network-snapshot.timer"])
+    print("SHAI Advanced stack applied. Persistent data was preserved.")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

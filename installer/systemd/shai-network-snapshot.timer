@@ -1,0 +1,11 @@
+[Unit]
+Description=Refresh SHEALTH network ownership data
+
+[Timer]
+OnBootSec=30s
+OnUnitActiveSec=30s
+AccuracySec=5s
+Unit=shai-network-snapshot.service
+
+[Install]
+WantedBy=timers.target

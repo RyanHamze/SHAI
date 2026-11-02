@@ -1,0 +1,162 @@
+#!/usr/bin/env python3
+"""Write a sanitized, read-only host and container socket snapshot for SHEALTH."""
+
+from __future__ import annotations
+
+import json
+import os
+import re
+import socket
+import subprocess
+import time
+from pathlib import Path
+
+
+OUTPUT = Path("/run/shai/network-snapshot.json")
+REGISTRY = Path("/etc/shai/service-registry.json")
+PROCESS_RE = re.compile(r'users:\(\(\"([^\"]+)\",pid=(\d+)')
+
+
+def run(args: list[str], timeout: int = 8) -> tuple[int, str]:
+    try:
+        result = subprocess.run(
+            args, check=False, text=True, stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL, timeout=timeout,
+        )
+        return result.returncode, result.stdout.strip()
+    except (OSError, subprocess.TimeoutExpired):
+        return 127, ""
+
+
+def registry() -> tuple[dict[tuple[str, int], dict[str, object]], list[dict[str, object]]]:
+    try:
+        data = json.loads(REGISTRY.read_text(encoding="utf-8"))
+        services = data.get("services", [])
+    except (OSError, json.JSONDecodeError, AttributeError):
+        services = []
+    ports = {}
+    for service in services:
+        for port in service.get("ports", []):
+            try:
+                ports[(str(port.get("protocol", "tcp")), int(port["port"]))] = service
+            except (KeyError, TypeError, ValueError):
+                pass
+    return ports, services
+
+
+def endpoint_port(endpoint: str) -> int | None:
+    try:
+        raw = endpoint.rsplit(":", 1)[1].strip("[]")
+        return int(raw) if raw not in {"*", ""} else None
+    except (IndexError, ValueError):
+        return None
+
+
+def purpose(protocol: str, port: int | None, ports: dict) -> tuple[str, str]:
+    if port is None:
+        return "unknown", "No numeric port"
+    item = ports.get((protocol, port))
+    if item:
+        return str(item.get("name", "registered service")), str(item.get("purpose", "SHAI registered service"))
+    try:
+        return socket.getservbyport(port, protocol), "Standard service-name hint; not proof of payload"
+    except OSError:
+        return "unregistered", "No registered purpose; inspect the owning process"
+
+
+def parse_ss(
+    output: str,
+    context: str,
+    ports: dict,
+) -> list[dict[str, object]]:
+    rows = []
+    for raw in output.splitlines():
+        fields = raw.split()
+        if len(fields) < 6:
+            continue
+        protocol, state, local, peer = fields[0], fields[1], fields[4], fields[5]
+        if protocol not in {"tcp", "udp"}:
+            continue
+        process_match = PROCESS_RE.search(raw)
+        owner = process_match.group(1) if process_match else "ownership unavailable"
+        pid = int(process_match.group(2)) if process_match else None
+        local_port, peer_port = endpoint_port(local), endpoint_port(peer)
+        relevant_port = local_port if state.upper() in {"LISTEN", "UNCONN"} else peer_port
+        service, description = purpose(protocol, relevant_port, ports)
+        rows.append({
+            "context": context,
+            "protocol": protocol,
+            "state": state,
+            "source": local,
+            "destination": peer,
+            "source_port": local_port,
+            "destination_port": peer_port,
+            "owner": owner,
+            "pid": pid,
+            "service": service,
+            "purpose": description,
+            "raw": raw,
+        })
+    return rows
+
+
+def containers() -> list[dict[str, object]]:
+    rc, ids = run(["docker", "ps", "-q"])
+    if rc or not ids:
+        return []
+    rc, output = run(["docker", "inspect", *ids.splitlines()], 12)
+    if rc:
+        return []
+    try:
+        inspected = json.loads(output)
+    except json.JSONDecodeError:
+        return []
+    result = []
+    for item in inspected:
+        state = item.get("State", {})
+        networks = item.get("NetworkSettings", {}).get("Networks", {})
+        result.append({
+            "id": str(item.get("Id", ""))[:12],
+            "name": str(item.get("Name", "")).lstrip("/"),
+            "pid": int(state.get("Pid", 0) or 0),
+            "status": str(state.get("Status", "unknown")),
+            "health": str(state.get("Health", {}).get("Status", "not configured")),
+            "networks": {
+                name: {"ip": value.get("IPAddress", ""), "gateway": value.get("Gateway", "")}
+                for name, value in networks.items()
+            },
+        })
+    return result
+
+
+def main() -> int:
+    if os.geteuid() != 0:
+        raise SystemExit("shai-network-snapshot must run as the system service")
+    ports, services = registry()
+    rc, host_output = run(["ss", "-H", "-tunap"])
+    connections = parse_ss(host_output if rc == 0 else "", "host", ports)
+    container_rows = containers()
+    for container in container_rows:
+        pid = int(container["pid"])
+        if pid <= 0:
+            continue
+        rc, output = run(["nsenter", "-t", str(pid), "-n", "ss", "-H", "-tunap"])
+        if rc == 0:
+            connections.extend(parse_ss(output, f"container:{container['name']}", ports))
+    payload = {
+        "schema": 1,
+        "generated_at": int(time.time()),
+        "services": services,
+        "containers": container_rows,
+        "connections": connections,
+    }
+    OUTPUT.parent.mkdir(parents=True, exist_ok=True, mode=0o755)
+    temporary = OUTPUT.with_suffix(".tmp")
+    temporary.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    temporary.chmod(0o644)
+    temporary.replace(OUTPUT)
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

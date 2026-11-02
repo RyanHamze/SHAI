@@ -31,6 +31,7 @@ PROTECTED = LIB / "PROTECTED_PACKAGES.regex"
 RESULT = Path("/var/lib/shai-installer/shapp-result.json")
 SETUP_CHOICES = Path("/var/lib/shai-installer/setup-choices.json")
 SHAPP_CONFIG = Path.home() / ".config/shai/shapp.json"
+STACK_STATE = Path("/var/lib/shai/stack/installed.json")
 BRAND = Path("/usr/share/shai/branding/shai-lockup-dark.svg")
 CART_WIDTH = 320
 CART_TEXT_CHARS = 34
@@ -119,6 +120,14 @@ def load_architecture() -> tuple[str, str]:
         if value in {"direct-host", "managed-stack"}:
             return value, source
     return "direct-host", "SHAI default"
+
+
+def installed_containers() -> set[str]:
+    try:
+        data = json.loads(STACK_STATE.read_text(encoding="utf-8"))
+        return {str(item) for item in data.get("services", [])}
+    except (OSError, json.JSONDecodeError, AttributeError):
+        return set()
 
 
 def save_architecture(value: str) -> None:
@@ -318,7 +327,17 @@ class ShappWindow(Gtk.ApplicationWindow):
         self.patterns = protected_patterns()
         self.apt_installed = installed_apt_packages()
         self.snap_installed = installed_snaps()
+        self.container_installed = installed_containers()
         self.installed_apps = discover_apps(self.patterns, self.catalog)
+        for item in self.catalog:
+            service = item.get("container_service")
+            if service in self.container_installed:
+                self.installed_apps.append(InstalledApp(
+                    "container", str(service), str(item["name"]),
+                    str(item["description"]), int(item["disk_mb"]),
+                    int(item["ram_mb"]), False,
+                ))
+        self.installed_apps.sort(key=lambda app: app.name.casefold())
         log_discovered_apps(self.installed_apps, "SHAPP opened")
         self.baseline: dict[str, bool] = {}
         self.desired: dict[str, bool] = {}
@@ -337,6 +356,9 @@ class ShappWindow(Gtk.ApplicationWindow):
         for package in self.snap_installed:
             self.baseline[f"snap:{package}"] = True
             self.desired[f"snap:{package}"] = True
+        for service in self.container_installed:
+            self.baseline[f"container:{service}"] = True
+            self.desired[f"container:{service}"] = True
         for item in self.catalog:
             for package in item["packages"]:
                 key = f"apt:{package}"
@@ -550,9 +572,25 @@ class ShappWindow(Gtk.ApplicationWindow):
 
     def catalog_status(self, item: dict[str, object], available: bool) -> str:
         if available:
+            if self.architecture_mode == "managed-stack" and item.get("container_service"):
+                return "Advanced Docker service · persistent data · private SHAI bridge"
             return str(item.get("status", "Available"))
         mode = "Direct Ubuntu" if self.architecture_mode == "direct-host" else "Managed Docker"
         return f"{mode} installer pending · {item.get('status', 'backend unavailable')}"
+
+    def item_keys(self, item: dict[str, object]) -> list[str]:
+        service = item.get("container_service")
+        if self.architecture_mode == "managed-stack" and service:
+            return [f"container:{service}"]
+        return [f"apt:{package}" for package in item["packages"]]
+
+    def backend_available(self, item: dict[str, object]) -> bool:
+        if self.architecture_mode == "managed-stack" and item.get("container_service"):
+            if item.get("container_service") == "zigbee2mqtt":
+                directory = Path("/dev/serial/by-id")
+                return directory.is_dir() and len(list(directory.glob("*"))) == 1
+            return True
+        return bool(item.get("available", True)) and bool(item["packages"])
 
     def build_catalog_view(self, category: str) -> Gtk.Widget:
         content = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
@@ -571,8 +609,8 @@ class ShappWindow(Gtk.ApplicationWindow):
     def catalog_row(self, item: dict[str, object]) -> Gtk.Widget:
         row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=12)
         row.add_css_class("app-row")
-        packages = [f"apt:{package}" for package in item["packages"]]
-        available = bool(item.get("available", True)) and bool(packages)
+        packages = self.item_keys(item)
+        available = self.backend_available(item)
         checked = available and all(self.desired.get(package, False) for package in packages)
         check = Gtk.CheckButton()
         check.set_active(checked)
@@ -695,8 +733,7 @@ class ShappWindow(Gtk.ApplicationWindow):
         return row
 
     def remove_install_from_cart(self, _button: Gtk.Button, item: dict[str, object]) -> None:
-        for package in item["packages"]:
-            key = f"apt:{package}"
+        for key in self.item_keys(item):
             self.desired[key] = self.baseline.get(key, False)
         self.sync_checks()
         self.refresh_cart()
@@ -745,8 +782,8 @@ class ShappWindow(Gtk.ApplicationWindow):
     def changes(self) -> tuple[list[dict[str, object]], list[InstalledApp]]:
         installs = []
         for item in self.catalog:
-            keys = [f"apt:{package}" for package in item["packages"]]
-            if not item.get("available", True) or not keys:
+            keys = self.item_keys(item)
+            if not self.backend_available(item) or not keys:
                 continue
             if all(self.desired.get(key, False) for key in keys) and any(
                 not self.baseline.get(key, False) for key in keys
@@ -759,17 +796,17 @@ class ShappWindow(Gtk.ApplicationWindow):
         ]
         removal_keys = {f"{app.source}:{app.package}" for app in removals}
         for item in self.catalog:
-            packages = [str(package) for package in item["packages"]]
-            for package in packages:
-                key = f"apt:{package}"
+            keys = self.item_keys(item)
+            for key in keys:
+                source, package = key.split(":", 1)
                 if self.baseline.get(key, False) and not self.desired.get(key, True) and key not in removal_keys:
                     removals.append(InstalledApp(
-                        "apt",
+                        source,
                         package,
                         str(item["name"]),
                         str(item["description"]),
-                        max(1, int(item["disk_mb"]) // len(packages)),
-                        max(1, int(item["ram_mb"]) // len(packages)),
+                        max(1, int(item["disk_mb"]) // len(keys)),
+                        max(1, int(item["ram_mb"]) // len(keys)),
                         False,
                     ))
                     removal_keys.add(key)
@@ -782,14 +819,15 @@ class ShappWindow(Gtk.ApplicationWindow):
     ) -> tuple[int, int, dict[str, int]]:
         disk = sum(int(item["disk_mb"]) for item in installs)
         ram = sum(int(item["ram_mb"]) for item in installs)
-        catalog_by_package = {
-            package: item for item in self.catalog for package in item["packages"]
-        }
+        catalog_by_package = {}
+        for item in self.catalog:
+            for key in self.item_keys(item):
+                catalog_by_package[key] = item
         counted_ram: set[str] = set()
         removal_ram: dict[str, int] = {}
         for app in removals:
             disk -= app.disk_mb
-            item = catalog_by_package.get(app.package)
+            item = catalog_by_package.get(f"{app.source}:{app.package}")
             amount = app.ram_mb
             if item:
                 if str(item["id"]) in counted_ram:
@@ -829,8 +867,8 @@ class ShappWindow(Gtk.ApplicationWindow):
                 label.add_css_class("danger")
 
         for item, row, check, status in self.catalog_controls:
-            packages = [f"apt:{package}" for package in item["packages"]]
-            backend_available = bool(item.get("available", True)) and bool(packages)
+            packages = self.item_keys(item)
+            backend_available = self.backend_available(item)
             status.remove_css_class("online")
             status.remove_css_class("locked")
             status.remove_css_class("restriction")
@@ -939,13 +977,14 @@ class ShappWindow(Gtk.ApplicationWindow):
         installs, removals = self.changes()
         plan_id = str(uuid.uuid4())
         plan_data = {
-            "schema": 2,
+            "schema": 3,
             "plan_id": plan_id,
             "target_user": os.environ.get("USER", ""),
             "architecture": self.architecture_mode,
             "install": [str(item["id"]) for item in installs],
             "remove_apt": sorted({app.package for app in removals if app.source == "apt"}),
             "remove_snap": sorted({app.package for app in removals if app.source == "snap"}),
+            "remove_container": sorted({app.package for app in removals if app.source == "container"}),
         }
         cache = Path.home() / ".cache/shai"
         cache.mkdir(parents=True, exist_ok=True, mode=0o700)
@@ -979,10 +1018,21 @@ class ShappWindow(Gtk.ApplicationWindow):
         if result.get("status") == "success":
             self.apt_installed = installed_apt_packages()
             self.snap_installed = installed_snaps()
+            self.container_installed = installed_containers()
             self.baseline = {f"apt:{package}": True for package in self.apt_installed}
             self.baseline.update({f"snap:{package}": True for package in self.snap_installed})
+            self.baseline.update({f"container:{service}": True for service in self.container_installed})
             self.desired = dict(self.baseline)
             self.installed_apps = discover_apps(self.patterns, self.catalog)
+            for item in self.catalog:
+                service = item.get("container_service")
+                if service in self.container_installed:
+                    self.installed_apps.append(InstalledApp(
+                        "container", str(service), str(item["name"]),
+                        str(item["description"]), int(item["disk_mb"]),
+                        int(item["ram_mb"]), False,
+                    ))
+            self.installed_apps.sort(key=lambda app: app.name.casefold())
             log_discovered_apps(self.installed_apps, "SHAPP refreshed after changes")
             self.rebuild_installed()
             self.sync_checks()

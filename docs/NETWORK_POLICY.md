@@ -53,3 +53,9 @@ Acceptance tests must include default startup, idle/background activity, discove
 The first tested desktop control is a proxy-based Web Offline / Online toggle. Web Offline is the system-wide dconf default for new users. It sends HTTP, HTTPS, FTP and SOCKS proxy-aware traffic to closed loopback port 1 while bypassing localhost, `.local` and common RFC1918 private-LAN addresses. Firefox is managed with a system-wide enterprise policy that locks it to the system proxy, so users cannot accidentally select a separate Firefox proxy mode.
 
 This control is convenience and defense in depth, not complete enforcement. Applications that ignore GNOME proxy settings can still reach the internet. The dashboard must display this state as **Web Offline (proxy)** rather than **Internet blocked** or **Air-gapped** until firewall-backed LAN-only enforcement and traffic tests are complete.
+
+## Advanced managed stack baseline
+
+Direct Ubuntu installation is the default. The Advanced selection installs Docker Engine and Compose only from a visible, user-approved SHAPP terminal operation. Home Assistant, Mosquitto, and Zigbee2MQTT run in separate containers with separate persistent bind-mounted data directories. Tested image tags are explicit and pulled only during that approved online operation; resolved repository digests are recorded locally.
+
+The default Compose topology uses an internal `shai-automation` bridge for MQTT and Zigbee service traffic. Home Assistant also joins `shai-lan`, a normal bridge used only for manually configured LAN integrations. No service uses host networking, Home Assistant discovery is not enabled by SHAI, Zigbee2MQTT MQTT discovery is disabled, and web interfaces bind to host loopback by default. VLAN/macvlan exposure and LAN-facing administrative ports require a later explicit network plan; they are not silently created.

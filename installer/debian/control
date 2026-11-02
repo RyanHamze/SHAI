@@ -1,10 +1,10 @@
 Package: shai-installer
-Version: 0.5.1
+Version: 0.6.4
 Section: admin
 Priority: optional
 Architecture: amd64
 Maintainer: Aabey LLC <info@aabeyllc.com>
-Depends: apt, bash, coreutils, dconf-cli, gir1.2-gtk-4.0, grep, libglib2.0-bin, python3, python3-gi, sed, systemd, util-linux, xdg-utils
+Depends: apt, bash, coreutils, dconf-cli, gir1.2-gtk-4.0, grep, iproute2, libglib2.0-bin, python3, python3-gi, sed, systemd, util-linux, xdg-utils
 Description: SHAI Setup for Ubuntu Desktop
  SHAI means Smart Home Automation and AI. This package installs an inert
  graphical setup application, exact protected debloat catalogs, SHAI theme assets,

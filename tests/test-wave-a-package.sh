@@ -3,7 +3,7 @@ set -Eeuo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 readonly ROOT
-readonly PACKAGE="${1:-$ROOT/dist/shai-installer_0.5.1_amd64.deb}"
+readonly PACKAGE="${1:-$ROOT/dist/shai-installer_0.6.4_amd64.deb}"
 TEST_DIR="$(mktemp -d /tmp/shai-wave-a-package-test.XXXXXX)"
 readonly TEST_DIR
 USER_NAME="$(id -un)"
@@ -21,6 +21,8 @@ python3 -m py_compile \
     "$ROOT/installer/src/shai-setup" \
     "$ROOT/installer/src/shai-shapp" \
     "$ROOT/installer/src/shai-shapp-apply" \
+    "$ROOT/installer/src/shai-stack-apply" \
+    "$ROOT/installer/src/shai-network-snapshot" \
     "$ROOT/installer/src/shai-shapp-log" \
     "$ROOT/installer/src/shai-health" \
     "$ROOT/installer/src/shai-wave-a-shell" \
@@ -128,6 +130,8 @@ python3 -m py_compile \
     "$TEST_DIR/root/usr/bin/shai-setup" \
     "$TEST_DIR/root/usr/bin/shai-shapp" \
     "$TEST_DIR/root/usr/bin/shai-shapp-apply" \
+    "$TEST_DIR/root/usr/lib/shai-installer/shai-stack-apply" \
+    "$TEST_DIR/root/usr/lib/shai-installer/shai-network-snapshot" \
     "$TEST_DIR/root/usr/lib/shai-installer/shai-shapp-log" \
     "$TEST_DIR/root/usr/bin/shai-health" \
     "$TEST_DIR/root/usr/bin/shai-wave-a-shell" \
@@ -157,6 +161,11 @@ for path in \
     usr/bin/shai-setup \
     usr/bin/shai-shapp \
     usr/bin/shai-shapp-apply \
+    usr/lib/shai-installer/shai-stack-apply \
+    usr/lib/shai-installer/shai-network-snapshot \
+    usr/lib/shai-installer/catalog/shai-stack-services.json \
+    usr/lib/systemd/system/shai-network-snapshot.service \
+    usr/lib/systemd/system/shai-network-snapshot.timer \
     usr/lib/shai-installer/shai-shapp-log \
     usr/bin/shai-health \
     usr/bin/shai-wave-a-shell \
@@ -273,7 +282,11 @@ grep -Fq 'Exec=shai-health' \
     "$TEST_DIR/root/usr/lib/shai-installer/assets/launchers/shai-health.desktop"
 grep -Fq 'CREATE TABLE IF NOT EXISTS hourly' "$TEST_DIR/root/usr/bin/shai-health"
 grep -Fq 'Sniffnet: live network monitor' "$TEST_DIR/root/usr/bin/shai-health"
-grep -Fq 'Socket collection runs only while this tab is open' "$TEST_DIR/root/usr/bin/shai-health"
+grep -Fq 'Active source → destination flows' "$TEST_DIR/root/usr/bin/shai-health"
+grep -Fq 'Open listening ports and owners' "$TEST_DIR/root/usr/bin/shai-health"
+grep -Fq '"schema": 3' "$TEST_DIR/root/usr/bin/shai-shapp"
+grep -Fq 'remove_container' "$TEST_DIR/root/usr/bin/shai-shapp-apply"
+grep -Fq 'home-assistant:2026.9.3' "$TEST_DIR/root/usr/lib/shai-installer/catalog/shai-stack-services.json"
 grep -Fq 'Host Ubuntu Environment Summary' "$TEST_DIR/root/usr/bin/shai-health"
 grep -Fq 'negative checks / total checks' "$TEST_DIR/root/usr/bin/shai-health"
 grep -Fq 'Estimated energy usage · rolling 24 hours' "$TEST_DIR/root/usr/bin/shai-health"

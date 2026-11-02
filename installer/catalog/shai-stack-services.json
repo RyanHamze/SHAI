@@ -1,0 +1,28 @@
+{
+  "schema": 1,
+  "project": "shai",
+  "services": {
+    "mosquitto": {
+      "name": "Mosquitto MQTT",
+      "image": "eclipse-mosquitto:2.0.21-openssl",
+      "minimum_ram_mb": 64,
+      "minimum_disk_mb": 256,
+      "ports": [{"port": 1883, "protocol": "tcp", "scope": "internal", "purpose": "MQTT messaging for SHAI automation services"}]
+    },
+    "home-assistant": {
+      "name": "Home Assistant",
+      "image": "ghcr.io/home-assistant/home-assistant:2026.9.3",
+      "minimum_ram_mb": 1024,
+      "minimum_disk_mb": 4096,
+      "ports": [{"port": 8123, "protocol": "tcp", "scope": "loopback", "purpose": "Home Assistant web interface"}]
+    },
+    "zigbee2mqtt": {
+      "name": "Zigbee2MQTT",
+      "image": "ghcr.io/koenkk/zigbee2mqtt:2.14.3",
+      "minimum_ram_mb": 256,
+      "minimum_disk_mb": 1024,
+      "requires_serial_by_id": true,
+      "ports": [{"port": 8080, "protocol": "tcp", "scope": "loopback", "purpose": "Zigbee2MQTT management interface"}]
+    }
+  }
+}
