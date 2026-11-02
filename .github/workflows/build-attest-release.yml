@@ -38,7 +38,7 @@ jobs:
           chmod +x installer/build.sh installer/src/* release/*.sh tests/*.sh tools/*.sh connectivity/bin/*
           tests/test-package.sh
       - name: Attest DEB provenance
-        if: github.event_name != 'pull_request'
+        if: github.event_name != 'pull_request' && github.event.repository.visibility == 'public'
         uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4
         with:
           subject-path: dist/shai-installer_*_amd64.deb
