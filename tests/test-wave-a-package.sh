@@ -135,6 +135,7 @@ python3 -m py_compile \
 
 mkdir -p "$TEST_DIR/log-home"
 if [[ $EUID -eq 0 ]]; then
+    chmod o+x "$TEST_DIR"
     chown nobody:nogroup "$TEST_DIR/log-home"
     runuser -u nobody -- env HOME="$TEST_DIR/log-home" \
         "$TEST_DIR/root/usr/lib/shai-installer/shai-shapp-log" \
