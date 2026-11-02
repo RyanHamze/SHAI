@@ -39,6 +39,11 @@ def load_catalog() -> dict[str, dict[str, object]]:
     return data["services"]
 
 
+def observer_image() -> str:
+    data = json.loads(CATALOG.read_text(encoding="utf-8"))
+    return str(data["infrastructure"]["engine-observer"]["image"])
+
+
 def installed() -> set[str]:
     try:
         data = json.loads(STATE.read_text(encoding="utf-8"))
@@ -153,8 +158,41 @@ def ensure_mqtt_credentials(image: str) -> tuple[str, str]:
     return username, password
 
 
-def compose_text(selected: set[str], catalog: dict[str, dict[str, object]], zigbee: str | None) -> str:
+def compose_text(
+    selected: set[str],
+    catalog: dict[str, dict[str, object]],
+    zigbee: str | None,
+    observer: str,
+) -> str:
     lines = ["name: shai", "services:"]
+    lines += [
+        "  engine-observer:",
+        f"    image: {observer}",
+        "    container_name: shai-engine-observer",
+        "    restart: unless-stopped",
+        "    read_only: true",
+        "    security_opt: [no-new-privileges:true]",
+        "    cap_drop: [ALL]",
+        "    environment:",
+        "      CONTAINERS: '1'",
+        "      EVENTS: '1'",
+        "      INFO: '1'",
+        "      PING: '1'",
+        "      VERSION: '1'",
+        "      POST: '0'",
+        "      EXEC: '0'",
+        "      IMAGES: '0'",
+        "      NETWORKS: '0'",
+        "      VOLUMES: '0'",
+        "      SYSTEM: '0'",
+        "    volumes:",
+        "      - /var/run/docker.sock:/var/run/docker.sock:ro",
+        "    tmpfs:",
+        "      - /tmp:rw,noexec,nosuid,size=8m",
+        "      - /run:rw,noexec,nosuid,size=8m",
+        "    networks: [shai-observer]",
+        "    profiles: [observer]",
+    ]
     if "mosquitto" in selected:
         lines += [
             "  mosquitto:", f"    image: {catalog['mosquitto']['image']}",
@@ -195,6 +233,10 @@ def compose_text(selected: set[str], catalog: dict[str, dict[str, object]], zigb
         "  shai-lan:",
         "    name: shai-lan",
         "    driver: bridge",
+        "  shai-observer:",
+        "    name: shai-observer",
+        "    driver: bridge",
+        "    internal: true",
     ]
     return "\n".join(lines) + "\n"
 
@@ -206,7 +248,9 @@ def write_configuration(selected: set[str], catalog: dict[str, dict[str, object]
     for service in SUPPORTED:
         (DATA / service.replace("-", "")).mkdir(parents=True, exist_ok=True)
     zigbee = serial_device() if "zigbee2mqtt" in selected else None
-    pulled = []
+    observer = observer_image()
+    pulled = [observer]
+    run(["docker", "pull", observer])
     for item in sorted(selected):
         image = str(catalog[item]["image"]); run(["docker", "pull", image]); pulled.append(image)
     if "mosquitto" in selected:
@@ -228,7 +272,9 @@ def write_configuration(selected: set[str], catalog: dict[str, dict[str, object]
             ); zconfig.chmod(0o600)
     timezone = Path("/etc/timezone").read_text(encoding="utf-8").strip() if Path("/etc/timezone").exists() else "UTC"
     (STACK / ".env").write_text(f"TZ={timezone}\n", encoding="utf-8"); (STACK / ".env").chmod(0o600)
-    (STACK / "compose.yaml").write_text(compose_text(selected, catalog, zigbee), encoding="utf-8")
+    (STACK / "compose.yaml").write_text(
+        compose_text(selected, catalog, zigbee, observer), encoding="utf-8"
+    )
     (STACK / "compose.yaml").chmod(0o640)
     locks = {}
     for image in pulled:
@@ -245,7 +291,7 @@ def write_configuration(selected: set[str], catalog: dict[str, dict[str, object]
                          "networks": networks})
     REGISTRY.write_text(json.dumps({"schema": 1, "services": services}, indent=2) + "\n", encoding="utf-8")
     REGISTRY.chmod(0o644)
-    return [item for item in sorted(selected)]
+    return ["observer", *sorted(selected)]
 
 
 def main() -> int:

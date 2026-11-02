@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
-readonly SHAI_VERSION="0.6.4"
+readonly SHAI_VERSION="0.7.1"
 readonly LIB_DIR="/usr/lib/shai-installer"
 readonly STATE_DIR="/var/lib/shai-installer"
 readonly LOG_DIR="/var/log/shai-installer"
@@ -429,59 +429,7 @@ gsettings_if_available() {
 }
 
 configure_terminal_theme() {
-    local palette_dir="$TARGET_HOME/.local/share/org.gnome.Ptyxis/palettes"
-    local profiles uuid
-    run_as_user install -d -m 0700 "$palette_dir"
-    run_as_user install -m 0644 "$LIB_DIR/assets/shai.palette" "$palette_dir/shai.palette"
-
-    if run_as_user gsettings list-schemas | grep -Fxq org.gnome.Ptyxis; then
-        profiles="$(run_as_user gsettings get org.gnome.Ptyxis profile-uuids 2>/dev/null || printf '[]')"
-        while IFS= read -r uuid; do
-            [[ -n "$uuid" ]] || continue
-            run_as_user gsettings set \
-                "org.gnome.Ptyxis.Profile:/org/gnome/Ptyxis/Profiles/$uuid/" \
-                palette shai
-            run_as_user gsettings set \
-                "org.gnome.Ptyxis.Profile:/org/gnome/Ptyxis/Profiles/$uuid/" \
-                opacity 1.0
-        done < <(python3 - "$profiles" <<'PY'
-import ast
-import sys
-
-raw = sys.argv[1]
-if raw.startswith("@as "):
-    raw = raw[4:]
-for item in ast.literal_eval(raw):
-    print(item)
-PY
-)
-    fi
-
-    if run_as_user gsettings list-schemas | grep -Fxq org.gnome.Terminal.ProfilesList; then
-        profiles="$(run_as_user gsettings get org.gnome.Terminal.ProfilesList list 2>/dev/null || printf '[]')"
-        while IFS= read -r uuid; do
-            [[ -n "$uuid" ]] || continue
-            run_as_user gsettings set \
-                "org.gnome.Terminal.Legacy.Profile:/org/gnome/terminal/legacy/profiles:/:$uuid/" \
-                use-theme-colors false
-            run_as_user gsettings set \
-                "org.gnome.Terminal.Legacy.Profile:/org/gnome/terminal/legacy/profiles:/:$uuid/" \
-                foreground-color '#33EE33'
-            run_as_user gsettings set \
-                "org.gnome.Terminal.Legacy.Profile:/org/gnome/terminal/legacy/profiles:/:$uuid/" \
-                background-color '#000000'
-        done < <(python3 - "$profiles" <<'PY'
-import ast
-import sys
-
-raw = sys.argv[1]
-if raw.startswith("@as "):
-    raw = raw[4:]
-for item in ast.literal_eval(raw):
-    print(item)
-PY
-)
-    fi
+    run_as_user /usr/bin/shai-terminal-theme-apply
 }
 
 configure_privacy_defaults() {
@@ -592,6 +540,10 @@ PY
 install_desktop_launcher() {
     local launcher="$1" desktop_dir="$TARGET_HOME/Desktop"
     install -m 0644 "$LIB_DIR/assets/launchers/$launcher" "/usr/share/applications/$launcher"
+    if [[ "$launcher" == shai-health.desktop ]]; then
+        install -m 0644 "$LIB_DIR/assets/launchers/$launcher" \
+            /usr/share/applications/com.aabey.shai.Health.desktop
+    fi
     if [[ -d "$desktop_dir" ]]; then
         run_as_user install -m 0755 \
             "$LIB_DIR/assets/launchers/$launcher" "$desktop_dir/$launcher"

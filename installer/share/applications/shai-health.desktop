@@ -8,3 +8,4 @@ Terminal=false
 Categories=System;Monitor;
 Keywords=SHAI;health;status;diagnostics;
 StartupNotify=true
+StartupWMClass=com.aabey.shai.Health

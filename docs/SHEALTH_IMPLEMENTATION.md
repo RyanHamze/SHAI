@@ -19,14 +19,17 @@ visibility, open listeners, offline status, Docker health, and energy estimates.
 - Compact clickable metric tiles, a rolling 24-hour heartbeat score graph, and
   a rolling 24-hour energy graph. Heartbeat is `100 × (1 - negative checks /
   total checks)`; over 95% is green, 80–95% amber, and below 80% red.
+- The Health summary uses a single-width responsive layout, wraps metric/status
+  groups, and permanently disables horizontal scrolling.
 - One local JSON health/energy summary per completed calendar day, exported on
   the first sample after midnight under `~/.local/state/shai/health/daily/`.
 - Interface counters, every open listening socket, owning process/PID, likely
   registered purpose, active source-to-destination flows, container context,
   and container network/IP/gateway assignments. Purpose labels are hints and
   never claims about payload contents.
-- Docker container status/stats, image/volume/cache totals, networks, volumes,
-  and a bounded recent-event query when Docker is installed and accessible.
+- Managed service status, CPU/memory/PID statistics, endpoints, private network
+  addresses, and bounded lifecycle events through SHAI's permanent read-only
+  observer. The desktop application never receives the raw engine socket.
 - OS/service uptime, failed service signal, local firewall visibility, reboot
   marker, and SHAI web-connectivity mode.
 - Offline energy model with configurable idle/max watts, currency, and price per
@@ -39,6 +42,11 @@ visibility, open listeners, offline status, Docker health, and energy estimates.
 SHEALTH does not install packages, change firewall/network settings, start or
 stop containers, restart services, or perform online checks. Settings change
 only SHEALTH collection, display, thresholds, retention, and estimates.
+
+The observer image is pinned by digest, has no published port, drops all Linux
+capabilities, uses a read-only filesystem, and permanently limits requests to
+GET/HEAD for container status, events, info, ping, and version. Attribution and
+Apache-2.0 notices are visible under SHEALTH Settings.
 
 ## Deferred integrations
 

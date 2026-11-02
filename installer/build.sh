@@ -3,7 +3,7 @@ set -Eeuo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 readonly ROOT
-readonly VERSION="0.6.4"
+readonly VERSION="0.7.1"
 readonly PACKAGE="shai-installer_${VERSION}_amd64"
 BUILD_ROOT="$(mktemp -d "/tmp/shai-installer-build-${VERSION}.XXXXXX")"
 readonly BUILD_ROOT
@@ -48,6 +48,7 @@ install -m 0755 "$ROOT/installer/src/shai-wave-a-shell" "$STAGE/usr/bin/shai-wav
 install -m 0755 "$ROOT/installer/src/shai-theme-apply" "$STAGE/usr/bin/shai-theme-apply"
 install -m 0755 "$ROOT/installer/src/shai-theme-reset" "$STAGE/usr/bin/shai-theme-reset"
 install -m 0755 "$ROOT/installer/src/shai-theme-default" "$STAGE/usr/bin/shai-theme-default"
+install -m 0755 "$ROOT/installer/src/shai-terminal-theme-apply" "$STAGE/usr/bin/shai-terminal-theme-apply"
 install -m 0755 "$ROOT/installer/src/shai-appearance" "$STAGE/usr/bin/shai-appearance"
 install -m 0755 "$ROOT/installer/src/shai-plan-validator" "$STAGE/usr/lib/shai-installer/shai-plan-validator"
 install -m 0755 "$ROOT/installer/src/shai-system-summary" "$STAGE/usr/lib/shai-installer/shai-system-summary"
@@ -85,6 +86,7 @@ install -m 0644 "$ROOT/installer/assets/gnome-wellbeing-panel.desktop" "$STAGE/u
 install -m 0644 "$ROOT/installer/assets/shai.palette" "$STAGE/usr/lib/shai-installer/assets/shai.palette"
 install -m 0644 "$ROOT/installer/README.md" "$STAGE/usr/share/doc/shai-installer/README.md"
 install -m 0644 "$ROOT/installer/SETUP_README.md" "$STAGE/usr/share/doc/shai-installer/SETUP_README.md"
+install -m 0644 "$ROOT/docs/THIRD_PARTY_NOTICES.md" "$STAGE/usr/share/doc/shai-installer/THIRD_PARTY_NOTICES.md"
 install -m 0644 "$ROOT/installer/share/applications/shai-setup.desktop" "$STAGE/usr/share/applications/shai-setup.desktop"
 for launcher in shai-home.desktop shai-shapp.desktop shai-health.desktop shai-aia.desktop shai-appearance.desktop; do
     install -m 0644 "$ROOT/installer/share/applications/$launcher" "$STAGE/usr/lib/shai-installer/assets/launchers/$launcher"
@@ -94,6 +96,7 @@ install -m 0644 "$ROOT/branding/SHAI_Brand_v2/shai-wordmark-dark.svg" "$STAGE/us
 install -m 0644 "$ROOT/branding/SHAI_Brand_v2/shai-welcome-1200x630.png" "$STAGE/usr/share/shai/branding/shai-welcome-1200x630.png"
 install -m 0644 "$ROOT/branding/theme/share/backgrounds/shai/shai-wallpaper-1920x1080.png" "$STAGE/usr/share/shai/branding/shai-wallpaper-1920x1080.png"
 install -m 0644 "$ROOT/branding/SHAI_Brand_v2/shai-lockup-dark.svg" "$STAGE/usr/share/icons/hicolor/scalable/apps/shai.svg"
+install -m 0644 "$ROOT/branding/theme/share/icons/SHAI/scalable/apps/shai-health.svg" "$STAGE/usr/share/icons/hicolor/scalable/apps/shai-health.svg"
 install -m 0644 "$ROOT/branding/theme/share/themes/SHAI/index.theme" "$STAGE/usr/share/themes/SHAI/index.theme"
 install -m 0644 "$ROOT/branding/theme/share/themes/SHAI/gnome-shell/gnome-shell.css" "$STAGE/usr/share/themes/SHAI/gnome-shell/gnome-shell.css"
 install -m 0644 "$ROOT/branding/theme/share/themes/SHAI/gtk-4.0/gtk.css" "$STAGE/usr/share/themes/SHAI/gtk-4.0/gtk.css"

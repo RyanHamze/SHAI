@@ -59,3 +59,10 @@ This control is convenience and defense in depth, not complete enforcement. Appl
 Direct Ubuntu installation is the default. The Advanced selection installs Docker Engine and Compose only from a visible, user-approved SHAPP terminal operation. Home Assistant, Mosquitto, and Zigbee2MQTT run in separate containers with separate persistent bind-mounted data directories. Tested image tags are explicit and pulled only during that approved online operation; resolved repository digests are recorded locally.
 
 The default Compose topology uses an internal `shai-automation` bridge for MQTT and Zigbee service traffic. Home Assistant also joins `shai-lan`, a normal bridge used only for manually configured LAN integrations. No service uses host networking, Home Assistant discovery is not enabled by SHAI, Zigbee2MQTT MQTT discovery is disabled, and web interfaces bind to host loopback by default. VLAN/macvlan exposure and LAN-facing administrative ports require a later explicit network plan; they are not silently created.
+
+A separate internal `shai-observer` bridge carries read-only service metadata.
+Its observer has no published host or LAN port. It permanently rejects non-GET/
+HEAD methods and every API family except containers, events, info, ping, and
+version. A read-only socket mount alone is not treated as protection; the
+endpoint allowlist is the policy boundary, while SHAPP's root helper retains
+all approved lifecycle operations.

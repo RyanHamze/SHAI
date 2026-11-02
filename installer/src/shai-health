@@ -324,40 +324,26 @@ def disk_sample(mount: str = "/") -> dict[str, object]:
 
 
 def docker_snapshot(details: bool = False) -> dict[str, object]:
-    if not shutil.which("docker"):
-        return {"available": False, "error": "Docker is not installed", "containers": []}
-    rc, output, error = run(["docker", "ps", "-a", "--format", "{{json .}}"], 6)
-    if rc:
-        return {"available": False, "error": error or "Docker is not accessible", "containers": []}
-    containers = []
-    for line in output.splitlines():
-        try:
-            item = json.loads(line)
-        except json.JSONDecodeError:
-            continue
-        containers.append({
-            "name": item.get("Names", "unknown"), "image": item.get("Image", ""),
-            "status": item.get("Status", ""), "state": item.get("State", ""),
-            "ports": item.get("Ports", ""),
-        })
-    if details and containers:
-        rc, stats, _ = run([
-            "docker", "stats", "--no-stream", "--format",
-            "{{json .}}",
-        ], 8)
-        if rc == 0:
-            by_name = {}
-            for line in stats.splitlines():
-                try:
-                    row = json.loads(line); by_name[row.get("Name")] = row
-                except json.JSONDecodeError:
-                    pass
-            for item in containers:
-                item.update(by_name.get(item["name"], {}))
-    healthy = sum("healthy" in str(item["status"]).lower() for item in containers)
-    running = sum(item["state"] == "running" for item in containers)
+    del details
+    try:
+        snapshot = json.loads(NETWORK_SNAPSHOT.read_text(encoding="utf-8"))
+        observer = snapshot.get("observer", {})
+        containers = snapshot.get("containers", [])
+        events = snapshot.get("container_events", [])
+        if not isinstance(observer, dict) or not isinstance(containers, list):
+            raise ValueError("invalid service snapshot")
+    except (OSError, UnicodeError, json.JSONDecodeError, ValueError) as exc:
+        return {"available": False, "error": f"Service status is unavailable: {exc}", "containers": [], "events": []}
+    if not observer.get("available"):
+        return {"available": False, "error": observer.get("error", "Service observer is unavailable"), "containers": [], "events": []}
+    healthy = sum(
+        item.get("status") == "running" and item.get("health") != "unhealthy"
+        for item in containers
+    )
+    running = sum(item.get("status") == "running" for item in containers)
     return {"available": True, "error": "", "containers": containers,
-            "healthy": healthy, "running": running}
+            "healthy": healthy, "running": running, "events": events,
+            "observer": observer}
 
 
 def host_status() -> dict[str, str]:
@@ -447,7 +433,7 @@ def duration(seconds: float) -> str:
 
 
 class HealthWindow(Gtk.ApplicationWindow):
-    TABS = ("Health", "Disk", "Memory", "CPU", "Network", "Docker", "Uptime", "Energy", "Events", "Settings")
+    TABS = ("Health", "Disk", "Memory", "CPU", "Network", "Services", "Uptime", "Energy", "Events", "Settings")
 
     def __init__(self, app: Gtk.Application) -> None:
         super().__init__(application=app, title="SHEALTH - SHAI Health")
@@ -475,7 +461,11 @@ class HealthWindow(Gtk.ApplicationWindow):
         for name in self.TABS:
             page = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12)
             page.add_css_class("content")
-            scroll = Gtk.ScrolledWindow(); scroll.set_child(page)
+            page.set_hexpand(True)
+            scroll = Gtk.ScrolledWindow()
+            scroll.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+            scroll.set_propagate_natural_width(False)
+            scroll.set_child(page)
             self.pages[name] = page; self.stack.add_named(scroll, name)
         self.build_settings()
         self.collect_now()
@@ -491,7 +481,7 @@ class HealthWindow(Gtk.ApplicationWindow):
             logo.set_content_fit(Gtk.ContentFit.CONTAIN); box.append(logo)
         copy = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=1)
         copy.append(label("SHEALTH", "title", False))
-        copy.append(label("Read-only host, service, network, Docker, and energy health", "subtitle"))
+        copy.append(label("Read-only host, service, network, and energy health", "subtitle"))
         box.append(copy)
         spacer = Gtk.Box(); spacer.set_hexpand(True); box.append(spacer)
         self.heartbeat = label("Collecting...", "live", False); self.heartbeat.set_xalign(1)
@@ -538,7 +528,7 @@ class HealthWindow(Gtk.ApplicationWindow):
         builders = {
             "Health": self.build_health, "Disk": self.build_disk,
             "Memory": self.build_memory, "CPU": self.build_cpu,
-            "Network": self.build_network, "Docker": self.build_docker,
+            "Network": self.build_network, "Services": self.build_services,
             "Uptime": self.build_uptime, "Energy": self.build_energy,
             "Events": self.build_events,
         }
@@ -624,11 +614,11 @@ class HealthWindow(Gtk.ApplicationWindow):
 
     def build_health(self) -> None:
         box = self.pages["Health"]; self.clear(box)
-        self.heading(box, "Health summary", "Tiles use the last cached sample; collection does not run when you click them.")
-        top = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=12)
+        self.heading(box, "Health summary", "Tiles and graphs use SHEALTH's latest local sample and stored history.")
+        top = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12)
         host = host_status()
         status_panel = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4); status_panel.add_css_class("panel")
-        status_panel.set_size_request(390, -1)
+        status_panel.set_hexpand(True)
         status_panel.append(label("Host Ubuntu Environment Summary", "section-title", False))
         status_panel.append(label(
             f"Failed system services: {host['failed_units']}\n"
@@ -651,14 +641,16 @@ class HealthWindow(Gtk.ApplicationWindow):
             False,
         ))
         top.append(heartbeat_graph); box.append(top)
-        tiles = Gtk.FlowBox(); tiles.set_selection_mode(Gtk.SelectionMode.NONE); tiles.set_max_children_per_line(7)
+        tiles = Gtk.FlowBox(); tiles.set_selection_mode(Gtk.SelectionMode.NONE)
+        tiles.set_min_children_per_line(2); tiles.set_max_children_per_line(4)
+        tiles.set_homogeneous(True)
         docker = self.sample["docker"]
         values = (
             ("Disk", f"{self.sample['disk']:.1f}%", self.metric_status("disk"), "Disk"),
             ("RAM", f"{self.sample['ram']:.1f}%", self.metric_status("ram"), "Memory"),
             ("CPU", f"{self.sample['cpu']:.1f}%", self.metric_status("cpu"), "CPU"),
             ("Network", human_bytes(int(self.sample["rx"]) + int(self.sample["tx"])), "healthy", "Network"),
-            ("Docker", f"{self.sample['docker_total']} containers", "healthy" if docker.get("available") else "nodata", "Docker"),
+            ("Services", f"{self.sample['docker_total']} managed", "healthy" if docker.get("available") else "nodata", "Services"),
             ("Energy", f"{self.sample['watts']:.1f} W est.", "healthy", "Energy"),
             ("Uptime", duration(float(self.sample["uptime"])), "healthy", "Uptime"),
         )
@@ -672,7 +664,9 @@ class HealthWindow(Gtk.ApplicationWindow):
                 button = Gtk.Button(label=f"{event['source']}: {event['message']}")
                 button.connect("clicked", lambda *_: self.show_tab("Events")); banner.append(button)
             box.append(banner)
-        strip = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=18); strip.add_css_class("panel")
+        strip = Gtk.FlowBox(); strip.set_selection_mode(Gtk.SelectionMode.NONE)
+        strip.set_min_children_per_line(2); strip.set_max_children_per_line(4)
+        strip.set_homogeneous(True); strip.add_css_class("panel")
         month_rows = self.store.db.execute(
             "SELECT coalesce(sum(energy_wh),0) value FROM samples WHERE ts>=?",
             (int(time.time()) - 30 * 86400,),
@@ -682,7 +676,7 @@ class HealthWindow(Gtk.ApplicationWindow):
                      f"Events open: {len(open_events)}",
                      f"Energy 30d: {kwh:.3f} kWh · {self.settings['currency']}{kwh * float(self.settings['price_kwh']):.2f} est.",
                      "Heartbeat: healthy"):
-            strip.append(label(text, "live", False))
+            strip.insert(label(text, "live"), -1)
         box.append(strip)
 
     def heatmap(self, box: Gtk.Box) -> None:
@@ -700,7 +694,7 @@ class HealthWindow(Gtk.ApplicationWindow):
 
     def build_disk(self) -> None:
         box = self.pages["Disk"]; self.clear(box)
-        self.heading(box, "Disk", "Selected mount points, capacity, and inode usage. Docker volume sizing is shown when Docker is accessible.")
+        self.heading(box, "Disk", "Selected mount points, capacity, inode usage, and managed-service data sizing.")
         for mount in self.settings.get("mounts", ["/"]):
             item = disk_sample(str(mount)); row = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4); row.add_css_class("row")
             row.append(label(str(mount), "section-title", False))
@@ -711,7 +705,7 @@ class HealthWindow(Gtk.ApplicationWindow):
 
     def build_memory(self) -> None:
         box = self.pages["Memory"]; self.clear(box)
-        self.heading(box, "Memory", "RAM, swap, and recent pressure proxy. Container limits appear in Docker.")
+        self.heading(box, "Memory", "RAM, swap, and recent pressure proxy. Managed-service limits appear in Services.")
         box.append(label(f"RAM: {self.sample['ram']:.1f}% of {self.sample['ram_mb']} MB\nSwap: {self.sample['swap']:.1f}% of {self.sample['swap_mb']} MB", "panel"))
         self.history_rows(box, "ram", "%")
 
@@ -830,36 +824,52 @@ class HealthWindow(Gtk.ApplicationWindow):
             message = f"Sniffnet launch failed: {exc}"; button.set_label(message)
             self.store.add_event("warning", "Sniffnet", message)
 
-    def build_docker(self) -> None:
-        box = self.pages["Docker"]; self.clear(box)
-        self.heading(box, "Docker", "Container details are queried only while this tab is open. SHEALTH never starts or stops containers.")
+    def build_services(self) -> None:
+        box = self.pages["Services"]; self.clear(box)
+        self.heading(box, "Managed service health", "Status and resource metadata come from SHAI's private read-only observer. SHEALTH cannot start, stop, execute in, or reconfigure a service.")
         data = docker_snapshot(True)
         if not data["available"]:
             box.append(label(str(data["error"]), "warning")); return
+        observer = data.get("observer", {})
+        box.append(label(
+            f"Observation path: {observer.get('network', 'private')}\n"
+            f"Policy: {observer.get('policy', 'read-only')}",
+            "panel",
+        ))
         for item in data["containers"]:
             row = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=3); row.add_css_class("row")
             row.append(label(str(item["name"]), "section-title", False))
-            row.append(label(f"Image: {item['image']}\nState: {item['state']} · {item['status']}\nCPU: {item.get('CPUPerc','n/a')} · RAM: {item.get('MemUsage','n/a')} · PIDs: {item.get('PIDs','n/a')}\nPorts: {item['ports']}"))
+            memory = f"{human_bytes(float(item.get('memory_usage', 0)))} / {human_bytes(float(item.get('memory_limit', 0)))}"
+            networks = ", ".join(
+                f"{name} {values.get('ip') or 'no address'}"
+                for name, values in item.get("networks", {}).items()
+            ) or "none"
+            row.append(label(
+                f"Image: {item.get('image', 'unknown')}\n"
+                f"State: {item.get('status', 'unknown')} · Health: {item.get('health', 'not configured')}\n"
+                f"CPU: {float(item.get('cpu_percent', 0)):.1f}% · RAM: {memory} · PIDs: {item.get('pids', 0)}\n"
+                f"Networks: {networks}\nEndpoints: {json.dumps(item.get('ports', {}), sort_keys=True)}"
+            ))
             box.append(row)
-        rc, output, _ = run(["docker", "system", "df"], 8)
-        if rc == 0: box.append(label("Images, volumes, and build cache\n" + output, "panel"))
-        rc, networks, _ = run(["docker", "network", "ls"], 8)
-        if rc == 0: box.append(label("Docker networks\n" + networks, "panel"))
-        rc, volumes, _ = run(["docker", "volume", "ls"], 8)
-        if rc == 0: box.append(label("Docker volumes\n" + volumes, "panel"))
-        rc, events, _ = run([
-            "docker", "events", "--since", "10m", "--until",
-            dt.datetime.now(dt.timezone.utc).isoformat(),
-            "--filter", "type=container",
-        ], 8)
-        if rc == 0: box.append(label("Recent container events\n" + (events or "No events in the last 10 minutes"), "panel"))
+        event_panel = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4); event_panel.add_css_class("panel")
+        event_panel.append(label("Recent service events", "section-title", False))
+        events = data.get("events", [])
+        if not events:
+            event_panel.append(label("No lifecycle events in the latest collection window.", "muted"))
+        for event in events[-25:]:
+            actor = event.get("Actor", {}).get("Attributes", {})
+            event_panel.append(label(
+                f"{event.get('Action', 'event')} · {actor.get('name') or event.get('id', 'unknown')}",
+                "muted", False,
+            ))
+        box.append(event_panel)
 
     def build_uptime(self) -> None:
         box = self.pages["Uptime"]; self.clear(box)
         self.heading(box, "Uptime", "Host uptime and start state for monitored host services.")
         boot = dt.datetime.now() - dt.timedelta(seconds=float(self.sample["uptime"]))
         box.append(label(f"OS uptime: {duration(float(self.sample['uptime']))}\nLast boot: {boot.astimezone().strftime('%Y-%m-%d %H:%M:%S %Z')}", "panel"))
-        for service in ("NetworkManager", "sshd", "docker"):
+        for service, display_name in (("NetworkManager", "Network Manager"), ("sshd", "Secure Shell"), ("docker", "Container engine")):
             rc, output, _ = run(["systemctl", "show", service, "--property=ActiveState,ActiveEnterTimestamp,SubState", "--no-pager"])
             values = {}
             if rc == 0:
@@ -869,7 +879,7 @@ class HealthWindow(Gtk.ApplicationWindow):
             active = values.get("ActiveState", "offline" if rc else "unknown")
             substate = values.get("SubState", "dead" if rc else "unknown")
             row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=12); row.add_css_class("row")
-            name = label(service, "section-title", False); name.set_size_request(180, -1); row.append(name)
+            name = label(display_name, "section-title", False); name.set_size_request(180, -1); row.append(name)
             active_label = label(active, "healthy" if active == "active" else "critical", False)
             active_label.set_size_request(80, -1); row.append(active_label)
             substate_label = label(substate, "healthy" if substate == "running" else "critical", False)
@@ -926,7 +936,7 @@ class HealthWindow(Gtk.ApplicationWindow):
             "Crossing a critical threshold opens an event; it closes after the value recovers. "
             "Desktop notifications remain off unless enabled below. Collection controls change "
             "only SHEALTH sampling, retention, optional socket reads, and energy estimates; they "
-            "do not change Ubuntu, networking, or Docker.",
+            "do not change Ubuntu, networking, or the service runtime.",
         )
         self.setting_widgets: dict[str, Gtk.Widget] = {}
         for key, title, low, high, step in (
@@ -960,6 +970,20 @@ class HealthWindow(Gtk.ApplicationWindow):
         self.setting_widgets["sniffnet_path"] = path; box.append(row)
         save = Gtk.Button(label="Save SHEALTH settings"); save.add_css_class("suggested-action"); save.connect("clicked", self.save_settings_clicked)
         box.append(save); self.settings_status = label("", "live"); box.append(self.settings_status)
+        notices = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=5); notices.add_css_class("panel")
+        notices.append(label("About and notices", "section-title", False))
+        notices.append(label(
+            "SHAI's read-only container observation policy is based on Tecnativa Docker Socket Proxy, "
+            "used under the Apache License 2.0 and modified in the RyanHamze fork.",
+            "muted",
+        ))
+        notices.append(Gtk.LinkButton.new_with_label(
+            "https://github.com/Tecnativa/docker-socket-proxy", "Original project and contributors"
+        ))
+        notices.append(Gtk.LinkButton.new_with_label(
+            "https://github.com/RyanHamze/docker-socket-proxy", "SHAI-maintained fork and changes"
+        ))
+        box.append(notices)
 
     def save_settings_clicked(self, _button: Gtk.Button) -> None:
         for key, widget in self.setting_widgets.items():

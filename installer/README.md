@@ -1,6 +1,6 @@
 # SHAI Setup installer
 
-This directory builds `shai-installer` 0.6.4 for a fresh, fully installed
+This directory builds `shai-installer` 0.7.1 for a fresh, fully installed
 Ubuntu Desktop 26.04 system on `amd64`.
 
 Installing the DEB is inert. It installs the SHAI Setup GUI, exact debloat
@@ -68,7 +68,7 @@ with approval.
 
 ## SHAPP functional draft
 
-Version 0.6.4 includes the functional SHAPP manager and SHEALTH dashboard.
+Version 0.7.1 includes the functional SHAPP manager and SHEALTH dashboard.
 Recommended and Optional tabs use the audited SHAI catalog. The
 Currently Installed tab discovers user-facing APT, Snap, and local desktop
 applications; protected Ubuntu/GNOME components are visible but locked.
@@ -89,3 +89,9 @@ interfaces, uptime, local service/firewall signals, Docker details, listening
 ports and owners, source-to-destination flows, threshold events, hourly rollups,
 energy estimates, and the optional Sniffnet launcher. Its local settings affect
 monitoring only.
+
+Advanced managed stacks also include a hidden, permanent read-only engine
+observer. It is built from the credited Tecnativa-based SHAI fork, has no
+published host/LAN port, and exposes only container status, statistics, events,
+version, ping, and engine information on a private internal network. Lifecycle
+changes remain exclusively in SHAPP's visible privileged helper.

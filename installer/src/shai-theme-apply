@@ -88,6 +88,10 @@ gsettings set org.gnome.desktop.background picture-uri "file://$WALLPAPER"
 gsettings set org.gnome.desktop.background picture-uri-dark "file://$WALLPAPER"
 gsettings set org.gnome.desktop.background picture-options zoom
 
+if command -v shai-terminal-theme-apply >/dev/null 2>&1; then
+    shai-terminal-theme-apply
+fi
+
 gtk_temp="$(mktemp "$GTK_DIR/.gtk.css.shai.XXXXXX")"
 trap 'rm -f -- "$gtk_temp"' EXIT
 install -m 0644 "$GTK_SOURCE" "$gtk_temp"

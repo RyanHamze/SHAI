@@ -9,12 +9,15 @@ import re
 import socket
 import subprocess
 import time
+import urllib.parse
+import urllib.request
 from pathlib import Path
 
 
 OUTPUT = Path("/run/shai/network-snapshot.json")
 REGISTRY = Path("/etc/shai/service-registry.json")
 PROCESS_RE = re.compile(r'users:\(\(\"([^\"]+)\",pid=(\d+)')
+MAX_API_RESPONSE = 8 * 1024 * 1024
 
 
 def run(args: list[str], timeout: int = 8) -> tuple[int, str]:
@@ -100,33 +103,108 @@ def parse_ss(
     return rows
 
 
-def containers() -> list[dict[str, object]]:
-    rc, ids = run(["docker", "ps", "-q"])
-    if rc or not ids:
-        return []
-    rc, output = run(["docker", "inspect", *ids.splitlines()], 12)
-    if rc:
-        return []
+def api_read(base: str, path: str, timeout: int = 6) -> bytes:
+    request = urllib.request.Request(base + path, headers={"Accept": "application/json"})
+    with urllib.request.urlopen(request, timeout=timeout) as response:
+        payload = response.read(MAX_API_RESPONSE + 1)
+    if len(payload) > MAX_API_RESPONSE:
+        raise ValueError("observer response exceeded the local safety limit")
+    return payload
+
+
+def api_get(base: str, path: str, timeout: int = 6) -> object:
+    return json.loads(api_read(base, path, timeout))
+
+
+def observer_endpoint() -> str:
+    rc, output = run([
+        "docker", "inspect", "shai-engine-observer", "--format",
+        "{{json .NetworkSettings.Networks}}",
+    ])
+    if rc or not output:
+        raise RuntimeError("SHAI Engine Observer is not running")
     try:
-        inspected = json.loads(output)
-    except json.JSONDecodeError:
-        return []
+        networks = json.loads(output)
+        selected = networks.get("shai-observer", {})
+        address = str(selected.get("IPAddress", ""))
+    except (json.JSONDecodeError, AttributeError):
+        address = ""
+    if not address:
+        raise RuntimeError("SHAI Engine Observer has no private observer-network address")
+    return f"http://{address}:2375"
+
+
+def cpu_percent(stats: dict[str, object]) -> float:
+    current = stats.get("cpu_stats", {})
+    previous = stats.get("precpu_stats", {})
+    try:
+        cpu_delta = int(current["cpu_usage"]["total_usage"]) - int(previous["cpu_usage"]["total_usage"])
+        system_delta = int(current["system_cpu_usage"]) - int(previous["system_cpu_usage"])
+        cpus = int(current.get("online_cpus") or len(current["cpu_usage"].get("percpu_usage", [])) or 1)
+        return max(0.0, cpu_delta / system_delta * cpus * 100) if system_delta > 0 else 0.0
+    except (KeyError, TypeError, ValueError, ZeroDivisionError):
+        return 0.0
+
+
+def containers() -> tuple[list[dict[str, object]], list[dict[str, object]], dict[str, object]]:
+    try:
+        base = observer_endpoint()
+        summaries = api_get(base, "/containers/json?all=1")
+        if not isinstance(summaries, list):
+            raise ValueError("observer returned an invalid container list")
+    except (OSError, RuntimeError, ValueError, json.JSONDecodeError) as exc:
+        return [], [], {"available": False, "error": str(exc)}
     result = []
-    for item in inspected:
+    for summary in summaries:
+        container_id = str(summary.get("Id", ""))
+        if not container_id:
+            continue
+        encoded = urllib.parse.quote(container_id, safe="")
+        try:
+            item = api_get(base, f"/containers/{encoded}/json")
+        except (OSError, ValueError, json.JSONDecodeError):
+            continue
+        try:
+            stats = api_get(base, f"/containers/{encoded}/stats?stream=false", 8)
+        except (OSError, ValueError, json.JSONDecodeError):
+            stats = {}
         state = item.get("State", {})
         networks = item.get("NetworkSettings", {}).get("Networks", {})
+        memory = stats.get("memory_stats", {}) if isinstance(stats, dict) else {}
+        ports = item.get("NetworkSettings", {}).get("Ports", {})
         result.append({
             "id": str(item.get("Id", ""))[:12],
             "name": str(item.get("Name", "")).lstrip("/"),
+            "image": str(item.get("Config", {}).get("Image", "")),
             "pid": int(state.get("Pid", 0) or 0),
+            "pids": int(stats.get("pids_stats", {}).get("current", 0) or 0),
             "status": str(state.get("Status", "unknown")),
             "health": str(state.get("Health", {}).get("Status", "not configured")),
+            "cpu_percent": round(cpu_percent(stats), 2),
+            "memory_usage": int(memory.get("usage", 0) or 0),
+            "memory_limit": int(memory.get("limit", 0) or 0),
+            "ports": ports,
             "networks": {
                 name: {"ip": value.get("IPAddress", ""), "gateway": value.get("Gateway", "")}
                 for name, value in networks.items()
             },
         })
-    return result
+    now = int(time.time())
+    events = []
+    try:
+        event_data = api_read(base, f"/events?since={now - 35}&until={now}")
+        events = [json.loads(line) for line in event_data.splitlines() if line.strip()][-100:]
+    except (OSError, ValueError, json.JSONDecodeError):
+        pass
+    return result, events, {
+        "available": True,
+        "name": "SHAI Engine Observer",
+        "policy": "GET/HEAD containers, events, info, ping, and version only",
+        "network": "shai-observer (private; no published port)",
+        "source": "https://github.com/RyanHamze/docker-socket-proxy",
+        "upstream": "https://github.com/Tecnativa/docker-socket-proxy",
+        "license": "Apache-2.0",
+    }
 
 
 def main() -> int:
@@ -135,7 +213,7 @@ def main() -> int:
     ports, services = registry()
     rc, host_output = run(["ss", "-H", "-tunap"])
     connections = parse_ss(host_output if rc == 0 else "", "host", ports)
-    container_rows = containers()
+    container_rows, events, observer = containers()
     for container in container_rows:
         pid = int(container["pid"])
         if pid <= 0:
@@ -148,6 +226,8 @@ def main() -> int:
         "generated_at": int(time.time()),
         "services": services,
         "containers": container_rows,
+        "container_events": events,
+        "observer": observer,
         "connections": connections,
     }
     OUTPUT.parent.mkdir(parents=True, exist_ok=True, mode=0o755)

@@ -3,7 +3,7 @@ set -Eeuo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 readonly ROOT
-readonly PACKAGE="${1:-$ROOT/dist/shai-installer_0.6.4_amd64.deb}"
+readonly PACKAGE="${1:-$ROOT/dist/shai-installer_0.7.1_amd64.deb}"
 TEST_DIR="$(mktemp -d /tmp/shai-wave-a-package-test.XXXXXX)"
 readonly TEST_DIR
 USER_NAME="$(id -un)"
@@ -16,7 +16,8 @@ bash -n \
     "$ROOT/installer/src/shai-installer" \
     "$ROOT/installer/src/shai-theme-apply" \
     "$ROOT/installer/src/shai-theme-reset" \
-    "$ROOT/installer/src/shai-theme-default"
+    "$ROOT/installer/src/shai-theme-default" \
+    "$ROOT/installer/src/shai-terminal-theme-apply"
 python3 -m py_compile \
     "$ROOT/installer/src/shai-setup" \
     "$ROOT/installer/src/shai-shapp" \
@@ -46,6 +47,25 @@ assert {"sniffnet", "home-assistant", "mosquitto", "zigbee2mqtt", "whisper", "je
         "keepassxc", "opensnitch", "suricata"} <= ids
 assert all(item["packages"] for item in apps if item["available"])
 assert all(not item["packages"] for item in apps if not item["available"])
+PY
+
+python3 - "$ROOT/installer/src/shai-stack-apply" "$ROOT/installer/catalog/shai-stack-services.json" <<'PY'
+import importlib.machinery
+import json
+import pathlib
+import sys
+
+module = importlib.machinery.SourceFileLoader("stack_apply", sys.argv[1]).load_module()
+catalog = json.loads(pathlib.Path(sys.argv[2]).read_text(encoding="utf-8"))
+observer = catalog["infrastructure"]["engine-observer"]["image"]
+compose = module.compose_text({"home-assistant"}, catalog["services"], None, observer)
+observer_block = compose.split("  engine-observer:", 1)[1].split("  home-assistant:", 1)[0]
+assert "ports:" not in observer_block
+assert "cap_drop: [ALL]" in observer_block
+assert "read_only: true" in observer_block
+assert "/var/run/docker.sock:/var/run/docker.sock:ro" in observer_block
+assert "networks: [shai-observer]" in observer_block
+assert "internal: true" in compose
 PY
 
 python3 - "$ROOT/installer/src/shai-installer" <<'PY'
@@ -172,6 +192,7 @@ for path in \
     usr/bin/shai-theme-apply \
     usr/bin/shai-theme-reset \
     usr/bin/shai-theme-default \
+    usr/bin/shai-terminal-theme-apply \
     usr/bin/shai-appearance \
     usr/lib/shai-installer/shai-plan-validator \
     usr/lib/shai-installer/shai-system-summary \
@@ -181,12 +202,14 @@ for path in \
     usr/lib/shai-installer/assets/shai.palette \
     usr/share/applications/shai-setup.desktop \
     usr/share/doc/shai-installer/SETUP_README.md \
+    usr/share/doc/shai-installer/THIRD_PARTY_NOTICES.md \
     usr/share/shai/branding/shai-lockup-dark.svg \
     usr/share/shai/branding/shai-wallpaper-1920x1080.png \
     usr/share/themes/SHAI/gnome-shell/gnome-shell.css \
     usr/share/themes/SHAI/gtk-4.0/gtk.css \
     usr/share/icons/SHAI/index.theme \
     usr/share/icons/SHAI/scalable/apps/shai-dashboard.svg \
+    usr/share/icons/hicolor/scalable/apps/shai-health.svg \
     usr/share/backgrounds/shai/shai-wallpaper-1920x1080.png \
     usr/share/backgrounds/shai/shai-wallpaper-2560x1440.png \
     usr/share/backgrounds/shai/shai-wallpaper-3840x2160.png; do
@@ -226,7 +249,8 @@ cmp -s \
 bash -n \
     "$TEST_DIR/root/usr/bin/shai-theme-apply" \
     "$TEST_DIR/root/usr/bin/shai-theme-reset" \
-    "$TEST_DIR/root/usr/bin/shai-theme-default"
+    "$TEST_DIR/root/usr/bin/shai-theme-default" \
+    "$TEST_DIR/root/usr/bin/shai-terminal-theme-apply"
 
 for deferred in shai-home.desktop shai-shapp.desktop shai-health.desktop shai-aia.desktop shai-appearance.desktop; do
     [[ ! -e "$TEST_DIR/root/usr/share/applications/$deferred" ]] || {
@@ -278,12 +302,23 @@ grep -Fq 'Application architecture' \
 grep -Fq 'LIVE AUTOSAVE' "$TEST_DIR/root/usr/bin/shai-shapp"
 grep -Fq 'Yes, change architecture' "$TEST_DIR/root/usr/bin/shai-shapp"
 grep -Fq 'Change application architecture?' "$TEST_DIR/root/usr/bin/shai-shapp"
+grep -Fq 'Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC' "$TEST_DIR/root/usr/bin/shai-health"
+grep -Fq 'StartupWMClass=com.aabey.shai.Health' \
+    "$TEST_DIR/root/usr/lib/shai-installer/assets/launchers/shai-health.desktop"
+grep -Fq "foreground-color '#33EE33'" "$TEST_DIR/root/usr/bin/shai-terminal-theme-apply"
+grep -Fq "background-color '#000000'" "$TEST_DIR/root/usr/bin/shai-terminal-theme-apply"
 grep -Fq 'Exec=shai-health' \
     "$TEST_DIR/root/usr/lib/shai-installer/assets/launchers/shai-health.desktop"
 grep -Fq 'CREATE TABLE IF NOT EXISTS hourly' "$TEST_DIR/root/usr/bin/shai-health"
 grep -Fq 'Sniffnet: live network monitor' "$TEST_DIR/root/usr/bin/shai-health"
 grep -Fq 'Active source → destination flows' "$TEST_DIR/root/usr/bin/shai-health"
 grep -Fq 'Open listening ports and owners' "$TEST_DIR/root/usr/bin/shai-health"
+grep -Fq 'Managed service health' "$TEST_DIR/root/usr/bin/shai-health"
+grep -Fq 'Original project and contributors' "$TEST_DIR/root/usr/bin/shai-health"
+grep -Fq '4012f85910be03737ca4e4565dfa86b6ce49d7b6573bdd1434ea51bbb5699145' \
+    "$TEST_DIR/root/usr/lib/shai-installer/catalog/shai-stack-services.json"
+grep -Fq 'shai-observer' "$TEST_DIR/root/usr/lib/shai-installer/shai-stack-apply"
+! grep -Fq '"Docker"' "$TEST_DIR/root/usr/bin/shai-health"
 grep -Fq '"schema": 3' "$TEST_DIR/root/usr/bin/shai-shapp"
 grep -Fq 'remove_container' "$TEST_DIR/root/usr/bin/shai-shapp-apply"
 grep -Fq 'home-assistant:2026.9.3' "$TEST_DIR/root/usr/lib/shai-installer/catalog/shai-stack-services.json"
