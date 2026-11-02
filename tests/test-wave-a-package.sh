@@ -3,7 +3,7 @@ set -Eeuo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 readonly ROOT
-readonly PACKAGE="${1:-$ROOT/dist/shai-installer_0.5.0_amd64.deb}"
+readonly PACKAGE="${1:-$ROOT/dist/shai-installer_0.5.1_amd64.deb}"
 TEST_DIR="$(mktemp -d /tmp/shai-wave-a-package-test.XXXXXX)"
 readonly TEST_DIR
 USER_NAME="$(id -un)"
@@ -274,6 +274,10 @@ grep -Fq 'Exec=shai-health' \
 grep -Fq 'CREATE TABLE IF NOT EXISTS hourly' "$TEST_DIR/root/usr/bin/shai-health"
 grep -Fq 'Sniffnet: live network monitor' "$TEST_DIR/root/usr/bin/shai-health"
 grep -Fq 'Socket collection runs only while this tab is open' "$TEST_DIR/root/usr/bin/shai-health"
+grep -Fq 'Host Ubuntu Environment Summary' "$TEST_DIR/root/usr/bin/shai-health"
+grep -Fq 'negative checks / total checks' "$TEST_DIR/root/usr/bin/shai-health"
+grep -Fq 'Estimated energy usage · rolling 24 hours' "$TEST_DIR/root/usr/bin/shai-health"
+grep -Fq 'Completed calendar days are exported' "$TEST_DIR/root/usr/bin/shai-health"
 if grep -Eq 'chronyc|prepare_clock_for_online_install|timedatectl' \
     "$TEST_DIR/root/usr/bin/shai-shapp-apply"; then
     printf 'SHAPP apply must not alter or force system time synchronization.\n' >&2

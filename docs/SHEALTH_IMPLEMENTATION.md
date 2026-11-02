@@ -15,6 +15,11 @@ visibility, open listeners, offline status, Docker health, and energy estimates.
 - Local SQLite raw samples, hourly rollups, threshold events, and retention.
 - Disk/RAM/CPU thresholds, heartbeat display, seven-day hourly heatmap, and
   event banner.
+- Compact clickable metric tiles, a rolling 24-hour heartbeat score graph, and
+  a rolling 24-hour energy graph. Heartbeat is `100 × (1 - negative checks /
+  total checks)`; over 95% is green, 80–95% amber, and below 80% red.
+- One local JSON health/energy summary per completed calendar day, exported on
+  the first sample after midnight under `~/.local/state/shai/health/daily/`.
 - Interface counters, listening ports, socket/process ownership when permitted,
   and explicit limitations for unavailable ownership data.
 - Docker container status/stats, image/volume/cache totals, networks, volumes,

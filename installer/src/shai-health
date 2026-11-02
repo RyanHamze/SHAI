@@ -23,6 +23,7 @@ from gi.repository import Gdk, Gio, GLib, Gtk  # noqa: E402
 
 APP_ID = "com.aabey.shai.Health"
 STATE = Path.home() / ".local/state/shai/health"
+DAILY = STATE / "daily"
 CONFIG = Path.home() / ".config/shai/health.json"
 DB = STATE / "health.sqlite3"
 BRAND = Path("/usr/share/shai/branding/shai-lockup-dark.svg")
@@ -60,15 +61,20 @@ window { background: #0B0F0C; color: #DDFBE0; }
 .content { padding: 16px; }
 .section-title { color: #8DF28D; font-size: 17px; font-weight: 700; }
 .tile, .panel, .row { background: #111812; border: 1px solid #263A2B; border-radius: 6px; padding: 12px; }
-.tile { min-width: 135px; min-height: 76px; }
+.tile { min-width: 102px; min-height: 48px; padding: 6px 8px; }
 .tile-title { color: #93A89A; font-size: 11px; }
-.tile-value { color: #DDFBE0; font-size: 18px; font-weight: 700; }
+.tile-value { color: #DDFBE0; font-size: 14px; font-weight: 700; }
 .healthy { color: #33EE33; }
 .warning { color: #FFD166; }
 .critical { color: #FF6B6B; }
 .nodata { color: #718077; }
 .event-critical { background: #2B1212; border: 1px solid #FF6B6B; border-radius: 5px; color: #FFD7D7; padding: 10px; }
 .live { color: #8DF28D; font-weight: 700; }
+.chart { background: #0B0F0C; border: 1px solid #263A2B; border-radius: 4px; padding: 8px; }
+.chart-bar { border-radius: 2px 2px 0 0; min-width: 8px; }
+.bar-healthy { background: #33EE33; }
+.bar-warning { background: #FFD166; }
+.bar-critical { background: #FF6B6B; }
 button { background: #162019; color: #DDFBE0; border: 1px solid #354837; border-radius: 4px; padding: 8px 12px; }
 button:hover { border-color: #8DF28D; }
 button.suggested-action { background: #33EE33; color: #071008; border-color: #33EE33; font-weight: 700; }
@@ -137,13 +143,19 @@ class HealthStore:
             );
             CREATE TABLE IF NOT EXISTS hourly (
               hour INTEGER PRIMARY KEY, cpu_max REAL, ram_max REAL, disk_max REAL,
-              energy_wh REAL, worst TEXT, samples INTEGER
+              energy_wh REAL, worst TEXT, samples INTEGER,
+              negative INTEGER DEFAULT 0, checks INTEGER DEFAULT 0
             );
             CREATE TABLE IF NOT EXISTS events (
               id INTEGER PRIMARY KEY AUTOINCREMENT, opened INTEGER, closed INTEGER,
               severity TEXT, source TEXT, message TEXT
             );
         """)
+        columns = {row["name"] for row in self.db.execute("PRAGMA table_info(hourly)")}
+        if "negative" not in columns:
+            self.db.execute("ALTER TABLE hourly ADD COLUMN negative INTEGER DEFAULT 0")
+        if "checks" not in columns:
+            self.db.execute("ALTER TABLE hourly ADD COLUMN checks INTEGER DEFAULT 0")
         self.db.commit()
 
     def add_sample(self, sample: dict[str, object], settings: dict[str, object]) -> None:
@@ -155,23 +167,51 @@ class HealthStore:
         )
         self.db.execute("INSERT OR REPLACE INTO samples VALUES (?,?,?,?,?,?,?,?,?,?,?)", values)
         status = worst_status(sample, settings)
+        negative, checks = sample_check_counts(sample, settings)
         hour = ts - ts % 3600
         self.db.execute("""
-            INSERT INTO hourly VALUES (?,?,?,?,?,?,1)
+            INSERT INTO hourly(hour,cpu_max,ram_max,disk_max,energy_wh,worst,samples,negative,checks)
+            VALUES (?,?,?,?,?,?,1,?,?)
             ON CONFLICT(hour) DO UPDATE SET
               cpu_max=max(cpu_max,excluded.cpu_max), ram_max=max(ram_max,excluded.ram_max),
               disk_max=max(disk_max,excluded.disk_max), energy_wh=energy_wh+excluded.energy_wh,
               worst=CASE WHEN instr('healthy warning critical',excluded.worst) >
                               instr('healthy warning critical',worst)
                          THEN excluded.worst ELSE worst END,
-              samples=samples+1
-        """, (hour, sample["cpu"], sample["ram"], sample["disk"], sample["energy_wh"], status))
+              samples=samples+1, negative=negative+excluded.negative,
+              checks=checks+excluded.checks
+        """, (hour, sample["cpu"], sample["ram"], sample["disk"], sample["energy_wh"], status, negative, checks))
         self._events(sample, settings, ts)
         raw_cutoff = ts - int(settings["retention_days"]) * 86400
         hourly_cutoff = ts - int(settings["hourly_retention_days"]) * 86400
         self.db.execute("DELETE FROM samples WHERE ts < ?", (raw_cutoff,))
         self.db.execute("DELETE FROM hourly WHERE hour < ?", (hourly_cutoff,))
         self.db.commit()
+        self.export_daily_rollups()
+
+    def export_daily_rollups(self) -> None:
+        DAILY.mkdir(parents=True, exist_ok=True, mode=0o700)
+        today = dt.date.today().isoformat()
+        days = self.db.execute("""
+            SELECT DISTINCT date(ts,'unixepoch','localtime') day
+            FROM samples WHERE date(ts,'unixepoch','localtime') < ?
+        """, (today,)).fetchall()
+        for day_row in days:
+            day = str(day_row["day"])
+            destination = DAILY / f"{day}.json"
+            if destination.exists():
+                continue
+            summary = self.db.execute("""
+                SELECT count(*) samples, avg(cpu) cpu_average, max(cpu) cpu_peak,
+                       avg(ram) ram_average, max(ram) ram_peak, max(disk) disk_peak,
+                       sum(energy_wh) energy_wh
+                FROM samples WHERE date(ts,'unixepoch','localtime')=?
+            """, (day,)).fetchone()
+            payload = {"date": day, **{key: summary[key] for key in summary.keys()}}
+            temporary = destination.with_suffix(".tmp")
+            temporary.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+            temporary.chmod(0o600)
+            temporary.replace(destination)
 
     def _events(self, sample: dict[str, object], settings: dict[str, object], ts: int) -> None:
         checks = (
@@ -197,6 +237,12 @@ class HealthStore:
         ).fetchall()
 
     def heatmap(self, hours: int = 168) -> list[sqlite3.Row]:
+        cutoff = int(time.time()) - hours * 3600
+        return self.db.execute(
+            "SELECT * FROM hourly WHERE hour>=? ORDER BY hour", (cutoff,)
+        ).fetchall()
+
+    def hourly_last(self, hours: int = 24) -> list[sqlite3.Row]:
         cutoff = int(time.time()) - hours * 3600
         return self.db.execute(
             "SELECT * FROM hourly WHERE hour>=? ORDER BY hour", (cutoff,)
@@ -339,6 +385,17 @@ def worst_status(sample: dict[str, object], settings: dict[str, object]) -> str:
         states.append("critical" if value >= float(settings[critical]) else
                       "warning" if value >= float(settings[warning]) else "healthy")
     return "critical" if "critical" in states else "warning" if "warning" in states else "healthy"
+
+
+def sample_check_counts(
+    sample: dict[str, object], settings: dict[str, object]
+) -> tuple[int, int]:
+    checks = (
+        (float(sample["cpu"]), float(settings["cpu_warning"])),
+        (float(sample["ram"]), float(settings["ram_warning"])),
+        (float(sample["disk"]), float(settings["disk_warning"])),
+    )
+    return sum(value >= threshold for value, threshold in checks), len(checks)
 
 
 class Collector:
@@ -491,10 +548,72 @@ class HealthWindow(Gtk.ApplicationWindow):
 
     def tile(self, title: str, value: str, status: str, tab: str) -> Gtk.Button:
         button = Gtk.Button(); button.add_css_class("tile")
-        content = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=5)
-        content.append(label(title, "tile-title", False)); content.append(label(value, f"tile-value {status}", False))
+        content = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
+        title_widget = label(title, "tile-title", False)
+        value_widget = label(value, f"tile-value {status}", False)
+        title_widget.set_selectable(False); value_widget.set_selectable(False)
+        content.append(title_widget); content.append(value_widget)
         button.set_child(content); button.connect("clicked", lambda *_: self.show_tab(tab))
+        button.set_tooltip_text(f"Open {tab}")
         return button
+
+    def chart(
+        self,
+        points: list[tuple[int, float]],
+        title: str,
+        unit: str,
+        minimum: float,
+        maximum: float,
+        status_for: object,
+    ) -> Gtk.Widget:
+        panel = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=5)
+        panel.add_css_class("panel"); panel.set_hexpand(True)
+        panel.append(label(title, "section-title", False))
+        graph = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=7); graph.add_css_class("chart")
+        graph.set_size_request(-1, 175)
+        axis = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+        axis.append(label(f"{maximum:.0f}{unit}", "muted", False))
+        axis_spacer = Gtk.Box(); axis_spacer.set_vexpand(True); axis.append(axis_spacer)
+        axis.append(label(f"{minimum:.0f}{unit}", "muted", False)); graph.append(axis)
+        bars = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=4)
+        bars.set_hexpand(True); bars.set_halign(Gtk.Align.FILL); bars.set_valign(Gtk.Align.FILL)
+        if not points:
+            empty = label("No cached data yet", "muted", False); empty.set_hexpand(True)
+            empty.set_halign(Gtk.Align.CENTER); empty.set_valign(Gtk.Align.CENTER); bars.append(empty)
+        for stamp, value in points[-24:]:
+            column = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+            column.set_hexpand(True); column.set_valign(Gtk.Align.FILL)
+            spacer = Gtk.Box(); spacer.set_vexpand(True); column.append(spacer)
+            bounded = min(maximum, max(minimum, value))
+            height = max(3, round(135 * (bounded - minimum) / max(0.001, maximum - minimum)))
+            bar = Gtk.Box(); bar.add_css_class("chart-bar"); bar.add_css_class(f"bar-{status_for(value)}")
+            bar.set_size_request(-1, height)
+            bar.set_tooltip_text(f"{dt.datetime.fromtimestamp(stamp).strftime('%Y-%m-%d %H:%M')} · {value:.2f}{unit}")
+            column.append(bar); bars.append(column)
+        graph.append(bars); panel.append(graph)
+        if points:
+            times = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL)
+            start = label(dt.datetime.fromtimestamp(points[-24:][0][0]).strftime("%H:%M"), "muted", False)
+            end = label(dt.datetime.fromtimestamp(points[-1][0]).strftime("%H:%M"), "muted", False)
+            spacer = Gtk.Box(); spacer.set_hexpand(True)
+            times.append(start); times.append(spacer); times.append(end); panel.append(times)
+        return panel
+
+    @staticmethod
+    def heartbeat_status(value: float) -> str:
+        if value > 95:
+            return "healthy"
+        if value >= 80:
+            return "warning"
+        return "critical"
+
+    def heartbeat_points(self) -> list[tuple[int, float]]:
+        points = []
+        for row in self.store.hourly_last(24):
+            checks = int(row["checks"] or 0)
+            score = 100.0 * (1.0 - int(row["negative"] or 0) / checks) if checks else 100.0
+            points.append((int(row["hour"]), max(0.0, min(100.0, score))))
+        return points
 
     def metric_status(self, key: str) -> str:
         value = float(self.sample[key])
@@ -505,6 +624,32 @@ class HealthWindow(Gtk.ApplicationWindow):
     def build_health(self) -> None:
         box = self.pages["Health"]; self.clear(box)
         self.heading(box, "Health summary", "Tiles use the last cached sample; collection does not run when you click them.")
+        top = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=12)
+        host = host_status()
+        status_panel = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4); status_panel.add_css_class("panel")
+        status_panel.set_size_request(390, -1)
+        status_panel.append(label("Host Ubuntu Environment Summary", "section-title", False))
+        status_panel.append(label(
+            f"Failed system services: {host['failed_units']}\n"
+            f"Firewall: {host['firewall']}\n"
+            f"Connectivity mode: {host['connectivity']}\n"
+            f"Reboot: {host['reboot']}\n"
+            "Local checks only; no update server was contacted.",
+        ))
+        top.append(status_panel)
+        heartbeat_points = self.heartbeat_points()
+        heartbeat_graph = self.chart(
+            heartbeat_points,
+            "Heartbeat · last 24 hours",
+            "%", 0, 100, self.heartbeat_status,
+        )
+        latest_score = heartbeat_points[-1][1] if heartbeat_points else 100.0
+        heartbeat_graph.prepend(label(
+            f"{latest_score:.1f}% now · score = 100 × (1 - negative checks / total checks)",
+            "healthy" if latest_score > 95 else "warning" if latest_score >= 80 else "critical",
+            False,
+        ))
+        top.append(heartbeat_graph); box.append(top)
         tiles = Gtk.FlowBox(); tiles.set_selection_mode(Gtk.SelectionMode.NONE); tiles.set_max_children_per_line(7)
         docker = self.sample["docker"]
         values = (
@@ -526,7 +671,6 @@ class HealthWindow(Gtk.ApplicationWindow):
                 button = Gtk.Button(label=f"{event['source']}: {event['message']}")
                 button.connect("clicked", lambda *_: self.show_tab("Events")); banner.append(button)
             box.append(banner)
-        self.heatmap(box)
         strip = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=18); strip.add_css_class("panel")
         month_rows = self.store.db.execute(
             "SELECT coalesce(sum(energy_wh),0) value FROM samples WHERE ts>=?",
@@ -539,17 +683,6 @@ class HealthWindow(Gtk.ApplicationWindow):
                      "Heartbeat: healthy"):
             strip.append(label(text, "live", False))
         box.append(strip)
-        host = host_status()
-        status_panel = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4); status_panel.add_css_class("panel")
-        status_panel.append(label("Ubuntu and security signals", "section-title", False))
-        status_panel.append(label(
-            f"Failed system services: {host['failed_units']}\n"
-            f"Firewall: {host['firewall']}\n"
-            f"Connectivity mode: {host['connectivity']}\n"
-            f"Reboot: {host['reboot']}\n"
-            "Checks are local and do not contact an update server.",
-        ))
-        box.append(status_panel)
 
     def heatmap(self, box: Gtk.Box) -> None:
         panel = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=7); panel.add_css_class("panel")
@@ -685,7 +818,22 @@ class HealthWindow(Gtk.ApplicationWindow):
         box.append(label(f"OS uptime: {duration(float(self.sample['uptime']))}\nLast boot: {boot.astimezone().strftime('%Y-%m-%d %H:%M:%S %Z')}", "panel"))
         for service in ("NetworkManager", "sshd", "docker"):
             rc, output, _ = run(["systemctl", "show", service, "--property=ActiveState,ActiveEnterTimestamp,SubState", "--no-pager"])
-            row = Gtk.Button(label=f"{service}\n{output if rc == 0 else 'not installed or inaccessible'}"); row.add_css_class("row"); box.append(row)
+            values = {}
+            if rc == 0:
+                for line_text in output.splitlines():
+                    if "=" in line_text:
+                        key, value = line_text.split("=", 1); values[key] = value
+            active = values.get("ActiveState", "offline" if rc else "unknown")
+            substate = values.get("SubState", "dead" if rc else "unknown")
+            row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=12); row.add_css_class("row")
+            name = label(service, "section-title", False); name.set_size_request(180, -1); row.append(name)
+            active_label = label(active, "healthy" if active == "active" else "critical", False)
+            active_label.set_size_request(80, -1); row.append(active_label)
+            substate_label = label(substate, "healthy" if substate == "running" else "critical", False)
+            substate_label.set_size_request(80, -1); row.append(substate_label)
+            timestamp = values.get("ActiveEnterTimestamp", "not installed or inaccessible")
+            detail = label(timestamp, "muted", False); detail.set_hexpand(True); row.append(detail)
+            box.append(row)
 
     def build_energy(self) -> None:
         box = self.pages["Energy"]; self.clear(box)
@@ -697,6 +845,22 @@ class HealthWindow(Gtk.ApplicationWindow):
         hour, day, month = (total_since(3600), total_since(86400), total_since(30 * 86400))
         cost = month / 1000 * float(self.settings["price_kwh"])
         box.append(label(f"Active method: CPU utilization model\nCurrent estimate: {self.sample['watts']:.1f} W\nLast hour: {hour:.2f} Wh\nLast day: {day / 1000:.3f} kWh\nLast 30 days: {month / 1000:.3f} kWh · {self.settings['currency']}{cost:.2f} estimated", "panel"))
+        energy_points = [
+            (int(row["hour"]), float(row["energy_wh"] or 0))
+            for row in self.store.hourly_last(24)
+        ]
+        chart_max = max([point[1] for point in energy_points] + [1.0]) * 1.15
+        box.append(self.chart(
+            energy_points,
+            "Estimated energy usage · rolling 24 hours",
+            "Wh", 0, chart_max,
+            lambda _value: "healthy",
+        ))
+        box.append(label(
+            f"Completed calendar days are exported to {DAILY}. One JSON log is created per day "
+            "after midnight; this graph always remains a rolling 24-hour view.",
+            "muted",
+        ))
         box.append(label("Model: idle watts + (max watts - idle watts) × CPU utilization. Per-app allocation is deferred until sufficient process history exists.", "muted"))
 
     def build_events(self) -> None:
@@ -712,7 +876,15 @@ class HealthWindow(Gtk.ApplicationWindow):
 
     def build_settings(self) -> None:
         box = self.pages["Settings"]; self.clear(box)
-        self.heading(box, "Settings", "These settings affect SHEALTH collection and estimates only. They do not change Ubuntu, networking, or Docker.")
+        self.heading(
+            box,
+            "Settings",
+            "Thresholds define when tiles, graphs, and events are healthy, warning, or critical. "
+            "Crossing a critical threshold opens an event; it closes after the value recovers. "
+            "Desktop notifications remain off unless enabled below. Collection controls change "
+            "only SHEALTH sampling, retention, optional socket reads, and energy estimates; they "
+            "do not change Ubuntu, networking, or Docker.",
+        )
         self.setting_widgets: dict[str, Gtk.Widget] = {}
         for key, title, low, high, step in (
             ("sample_interval", "Sample interval (seconds)", 30, 3600, 30),
