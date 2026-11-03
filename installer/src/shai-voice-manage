@@ -1,0 +1,82 @@
+#!/usr/bin/env python3
+"""Visible-terminal lifecycle for AIA-owned voice runtimes; never starts listening."""
+from __future__ import annotations
+
+import argparse
+import datetime
+import json
+import os
+from pathlib import Path
+import shutil
+import subprocess
+import sys
+
+ROOT = Path.home() / ".local/share/shai/voice"
+PACKAGES = {"piper": "piper-tts==1.8.0", "whisper": "faster-whisper==1.2.1",
+            "openwakeword": "openwakeword==0.6.0", "wyoming": "wyoming==1.11.0"}
+IPV4_PIP = "import socket,runpy; original=socket.getaddrinfo; socket.getaddrinfo=lambda host,port,family=0,*args,**kwargs: original(host,port,socket.AF_INET,*args,**kwargs); runpy.run_module('pip',run_name='__main__')"
+
+def run(args: list[str]) -> None:
+    print("+", " ".join(args), flush=True)
+    subprocess.run(args, check=True)
+
+def main() -> None:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("action", choices=("install", "remove"))
+    parser.add_argument("engine", choices=("espeak", *PACKAGES))
+    args = parser.parse_args()
+    ROOT.mkdir(parents=True, exist_ok=True, mode=0o700)
+    if ROOT.is_symlink():
+        raise SystemExit("Refusing a symlinked voice installation directory")
+    target = ROOT / args.engine
+    if target.is_symlink():
+        raise SystemExit("Refusing a symlinked voice runtime")
+    receipt = target / "installed.json"
+    if args.action == "remove":
+        if not receipt.is_file():
+            raise SystemExit("Not installed by AIA; external software will not be removed")
+        if args.engine == "espeak":
+            simulation = subprocess.check_output(["apt-get", "-s", "remove", "espeak-ng"], text=True)
+            removals = {line.split()[1] for line in simulation.splitlines() if line.startswith("Remv ")}
+            if not removals <= {"espeak-ng"}:
+                raise SystemExit("Removal would affect other applications; use Ubuntu's package manager")
+            run(["sudo", "apt-get", "remove", "-y", "espeak-ng"])
+        else:
+            runtime = target / "venv"
+            if runtime.is_symlink():
+                raise SystemExit("Refusing a symlinked runtime")
+            if runtime.exists():
+                shutil.rmtree(runtime)
+        receipt.unlink()
+        print("AIA-managed runtime removed. Voice files and external installations preserved.")
+        return
+    if receipt.exists():
+        raise SystemExit("Already installed by AIA")
+    target.mkdir(parents=True, exist_ok=True, mode=0o700)
+    if args.engine == "espeak":
+        if shutil.which("espeak-ng"):
+            raise SystemExit("eSpeak NG already exists outside AIA; it will not be adopted or removed")
+        run(["sudo", "apt-get", "-o", "Acquire::ForceIPv4=true", "install", "-y", "espeak-ng"])
+        run(["espeak-ng", "--version"])
+    else:
+        probe = subprocess.run([sys.executable, "-m", "venv", "--help"], stdout=subprocess.DEVNULL)
+        if not os.environ.get('SHAI_VENV_READY') and (probe.returncode or not Path("/usr/share/python-wheels").exists()):
+            run(["sudo", "apt-get", "-o", "Acquire::ForceIPv4=true", "install", "-y", "python3-venv"])
+        run([sys.executable, "-m", "venv", str(target / "venv")])
+        python = str(target / "venv/bin/python")
+        run([python, "-c", IPV4_PIP, "install", "--only-binary=:all:", "--index-url", "https://pypi.org/simple",
+             "--report", str(target / "install-report.json"), PACKAGES[args.engine]])
+        run([python, "-m", "pip", "check"])
+        with (target / "requirements.lock").open("w", encoding="utf-8") as stream:
+            subprocess.run([python, "-m", "pip", "freeze"], stdout=stream, check=True)
+    receipt.write_text(json.dumps({"engine": args.engine, "installed_at": datetime.datetime.now().astimezone().isoformat(),
+                                   "source": "Ubuntu APT" if args.engine == "espeak" else "PyPI", "listening": False}, indent=2) + "\n", encoding="utf-8")
+    receipt.chmod(0o600)
+    print("Voice runtime installed. No microphone or service started. Neural voice/recognition models must be supplied separately.")
+
+if __name__ == "__main__":
+    try:
+        main()
+    except (OSError, subprocess.CalledProcessError) as exc:
+        print(f"Voice action failed: {exc}. Check disk space, network permission and Python wheel compatibility; no success receipt was created.", file=sys.stderr)
+        raise SystemExit(1)

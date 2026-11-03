@@ -17,6 +17,13 @@ python3 -m py_compile \
 ./installer/build.sh
 deb="$(find dist -maxdepth 1 -name 'shai-installer_*_amd64.deb' -print -quit)"
 tests/test-wave-a-package.sh "$deb"
+python3 tests/test-shapp-backends.py
+python3 tests/test-install-errors.py
+python3 tests/test-control-broker.py
+python3 tests/test-voice-manage.py
+python3 tests/test-setup-shapp-audit.py
+python3 tests/test-aia-health-regressions.py
+python3 tests/test-ui-wiring.py
 [[ "$(dpkg-deb --field "$deb" Architecture)" == amd64 ]]
 [[ "$(dpkg-deb --field "$deb" Package)" == shai-installer ]]
 control_listing="$(dpkg-deb --ctrl-tarfile "$deb" | tar -tf -)"

@@ -4,9 +4,12 @@
 from __future__ import annotations
 
 import datetime as dt
+import hashlib
+import importlib.metadata
 import http.client
 import json
 import os
+import pwd
 import secrets
 import shlex
 import shutil
@@ -15,6 +18,7 @@ import subprocess
 import ssl
 import threading
 import time
+import textwrap
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -28,7 +32,7 @@ from gi.repository import Gdk, Gio, GLib, Gtk  # noqa: E402
 
 
 APP_ID = "com.aabey.shai.AIA"
-BRAND = Path("/usr/share/shai/branding/shai-lockup-dark.svg")
+BRAND = Path("/usr/share/icons/hicolor/scalable/apps/shai-ai-advisor.svg")
 STATE_DIR = Path.home() / ".local/state/shai/aia"
 DATA_DIR = Path.home() / ".local/share/shai/models"
 CONFIG_FILE = Path.home() / ".config/shai/aia.json"
@@ -37,6 +41,17 @@ RESERVE_MB = 1024
 SERVER_URL = "http://127.0.0.1:11435"
 SERVER_KEY = STATE_DIR / "server-api-key"
 SERVER_SERVICE = "shai-aia-model.service"
+BROKER_URL = "http://127.0.0.1:11500/v1"
+AI_SHARE = 0.20
+VOICE_ROOT = Path.home() / ".local/share/shai/voice"
+VOICE_HELPER = Path("/usr/lib/shai-installer/shai-voice-manage")
+VOICE_OPTIONS = (
+    {"id": "espeak", "name": "eSpeak NG", "description": "Small offline speech synthesizer", "commands": ("espeak-ng",), "packages": ("espeak-ng",), "ram_mb": 32},
+    {"id": "piper", "name": "Piper", "description": "Local neural text-to-speech; voice files are separate", "commands": ("piper",), "packages": ("piper-tts",), "ram_mb": 256},
+    {"id": "whisper", "name": "Whisper / faster-whisper", "description": "Local speech recognition; recognition models are separate", "commands": ("whisper", "faster-whisper", "whisper-cli"), "packages": ("faster-whisper", "openai-whisper", "whisper.cpp"), "ram_mb": 512},
+    {"id": "openwakeword", "name": "openWakeWord", "description": "Local wake-word engine; never starts a microphone automatically", "commands": ("openwakeword",), "packages": ("openwakeword",), "ram_mb": 256},
+    {"id": "wyoming", "name": "Wyoming", "description": "Local voice protocol library, not a speech engine", "commands": ("wyoming-satellite", "wyoming-piper", "wyoming-faster-whisper"), "packages": ("wyoming", "wyoming-piper", "wyoming-faster-whisper"), "ram_mb": 64},
+)
 
 MODELS = (
     {
@@ -48,6 +63,8 @@ MODELS = (
         "license": "Apache-2.0",
         "file": "SmolLM2-135M-Instruct.Q4_K_M.gguf",
         "url": "https://huggingface.co/QuantFactory/SmolLM2-135M-Instruct-GGUF/resolve/main/SmolLM2-135M-Instruct.Q4_K_M.gguf",
+        "sha256": "8030f04528538d47bda434f6f0bdf3952c40a58123e4d5e755332f23731a8684",
+        "bytes": 105454144,
         "disk_mb": 105,
         "ram_mb": 420,
         "rank": 1,
@@ -63,11 +80,30 @@ MODELS = (
         "license": "Apache-2.0",
         "file": "SmolLM2-360M-Instruct-Q4_K_M.gguf",
         "url": "https://huggingface.co/lmstudio-community/SmolLM2-360M-Instruct-GGUF/resolve/main/SmolLM2-360M-Instruct-Q4_K_M.gguf",
+        "sha256": "e55c2a5df7f8f6eed1a843ff709fa8008dbce65d82e57c5c06dec5ee8d060415",
+        "bytes": 270590592,
         "disk_mb": 271,
         "ram_mb": 780,
         "rank": 2,
         "role": "Recommended light upgrade",
         "quality": "Better local chat; still not a system administrator",
+    },
+    {
+        "id": "qwen25-05b-q4",
+        "name": "Qwen 2.5 0.5B Instruct",
+        "publisher": "Qwen",
+        "distributor": "Qwen official GGUF",
+        "params": "0.5B",
+        "license": "Apache-2.0",
+        "file": "qwen2.5-0.5b-instruct-q4_k_m.gguf",
+        "url": "https://huggingface.co/Qwen/Qwen2.5-0.5B-Instruct-GGUF/resolve/main/qwen2.5-0.5b-instruct-q4_k_m.gguf",
+        "sha256": "74a4da8c9fdbcd15bd1f6d01d621410d31c6fc00986f5eb687824e7b93d7a9db",
+        "bytes": 491400032,
+        "disk_mb": 492,
+        "ram_mb": 650,
+        "rank": 3,
+        "role": "Preferred lightweight default",
+        "quality": "Best small default for direct questions and short local guidance",
     },
     {
         "id": "llama32-1b-q4",
@@ -78,15 +114,19 @@ MODELS = (
         "license": "Llama 3.2 Community License",
         "file": "Llama-3.2-1B-Instruct-Q4_K_M.gguf",
         "url": "https://huggingface.co/bartowski/Llama-3.2-1B-Instruct-GGUF/resolve/main/Llama-3.2-1B-Instruct-Q4_K_M.gguf",
+        "sha256": "6f85a640a97cf2bf5b8e764087b1e83da0fdb51d7c9fab7d0fece9385611df83",
+        "bytes": 807694464,
         "disk_mb": 808,
         "ram_mb": 1800,
-        "rank": 3,
+        "rank": 4,
         "role": "Higher-capability CPU model",
         "quality": "More capable, but slower and memory constrained on small hosts",
     },
 )
 
 INTEGRATIONS = (
+    {"id": "exiftool", "name": "ExifTool Metadata Cleaner", "kind": "exiftool", "port": 0,
+     "description": "Local CLI and GUI. Read: exiftool -json -- FILE. Remove: exiftool -all= -- FILE. Bulk: exiftool -r -all= -- FOLDER. Writes require approval; _original backups retain metadata."},
     {"id": "home-assistant", "name": "Home Assistant", "kind": "ha", "port": 8123,
      "description": "Local automation API, entity status, and approved configuration assistance."},
     {"id": "zigbee2mqtt", "name": "Zigbee2MQTT", "kind": "mqtt", "port": 1883,
@@ -112,6 +152,11 @@ INTEGRATIONS = (
 )
 
 CSS = b"""
+headerbar, headerbar.titlebar { background: #111812; color: #DDFBE0; border-bottom: 1px solid #354837; box-shadow: none; }
+headerbar label, headerbar .title, headerbar .subtitle { color: #DDFBE0; }
+headerbar button, windowcontrols button { background: #1A2B1D; color: #DDFBE0; }
+headerbar button:hover, windowcontrols button:hover { background: #304B35; color: #FFFFFF; }
+headerbar:backdrop, headerbar:backdrop label { background: #111812; color: #A7B7AA; }
 window { background: #0B0F0C; color: #DDFBE0; }
 .header { background: #0B0F0C; border-bottom: 1px solid #263A2B; padding: 12px 18px; }
 .sidebar { background: #111812; border-right: 1px solid #263A2B; padding: 10px; }
@@ -170,6 +215,8 @@ def load_config() -> dict[str, object]:
         "home_assistant_url": "http://127.0.0.1:8123",
         "imported_models": [],
         "integrations": {},
+        "last_model_error": "",
+        "last_model_test": "Not run yet",
     }
     try:
         loaded = json.loads(CONFIG_FILE.read_text(encoding="utf-8"))
@@ -296,10 +343,16 @@ def installed_catalog_models() -> list[dict[str, object]]:
 
 
 class AIAWindow(Gtk.ApplicationWindow):
-    TABS = ("Chat", "Models", "Hardware", "Voice", "Integrations", "Activity", "Settings")
+    TABS = ("Chat", "Models", "Hardware", "Voice", "Integrations", "Control Center", "Activity", "Settings")
 
     def __init__(self, app: Gtk.Application) -> None:
-        super().__init__(application=app, title="AIA - Local AI Assistant")
+        super().__init__(application=app, title="AIA AI Assistant")
+        titlebar = Gtk.HeaderBar()
+        titlebar.add_css_class("titlebar")
+        titlebar.set_title_widget(Gtk.Label(label="AIA AI Assistant"))
+        titlebar.set_show_title_buttons(True)
+        self.set_titlebar(titlebar)
+        self.set_icon_name("shai-ai-advisor")
         self.set_default_size(1120, 760)
         self.set_size_request(900, 620)
         self.maximize()
@@ -344,12 +397,12 @@ class AIAWindow(Gtk.ApplicationWindow):
         box.add_css_class("header")
         if BRAND.exists():
             logo = Gtk.Picture.new_for_filename(str(BRAND))
-            logo.set_size_request(220, 46)
+            logo.set_size_request(46, 46)
             logo.set_content_fit(Gtk.ContentFit.CONTAIN)
             box.append(logo)
         copy = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=1)
-        copy.append(label("AIA", "title"))
-        copy.append(label("Offline-first AI advisor and local assistant", "muted"))
+        copy.append(label("AIA AI Assistant", "title"))
+        copy.append(label("Local AI center | models, hardware, integrations and approved control", "muted"))
         box.append(copy)
         spacer = Gtk.Box()
         spacer.set_hexpand(True)
@@ -383,7 +436,7 @@ class AIAWindow(Gtk.ApplicationWindow):
             button.remove_css_class("nav-active")
             if tab == name:
                 button.add_css_class("nav-active")
-        getattr(self, f"build_{name.lower()}")()
+        getattr(self, f"build_{name.lower().replace(' ', '_')}")()
 
     def heading(self, box: Gtk.Box, title: str, subtitle: str) -> None:
         box.append(label(title, "title"))
@@ -416,6 +469,8 @@ class AIAWindow(Gtk.ApplicationWindow):
         run(["systemctl", "--user", "daemon-reload"], timeout=8)
         run(["systemctl", "--user", "enable", SERVER_SERVICE], timeout=8)
         action = "restart" if restart else "start"
+        run(["systemctl", "--user", "set-property", "--runtime", SERVER_SERVICE,
+             f"CPUQuota={max(20, (os.cpu_count() or 1) * 20)}%", "MemoryHigh=20%", "MemoryMax=25%"], timeout=8)
         code, output = run(["systemctl", "--user", action, SERVER_SERVICE], timeout=12)
         audit("model-service", f"{action} | {'ok' if code == 0 else output}")
 
@@ -432,6 +487,90 @@ class AIAWindow(Gtk.ApplicationWindow):
         except (OSError, urllib.error.URLError):
             return False
 
+    def service_status(self) -> tuple[str, str]:
+        code, output = run(
+            ["systemctl", "--user", "show", SERVER_SERVICE,
+             "--property=ActiveState", "--property=SubState", "--property=MainPID"],
+            timeout=4,
+        )
+        if code != 0:
+            return "unavailable", output or "User service manager is unavailable"
+        values = dict(line.split("=", 1) for line in output.splitlines() if "=" in line)
+        state = values.get("ActiveState", "unknown")
+        substate = values.get("SubState", "unknown")
+        pid = values.get("MainPID", "0")
+        active_path = self.active_path()
+        command_path = ""
+        if pid.isdigit() and int(pid) > 0:
+            try:
+                command = Path(f"/proc/{pid}/cmdline").read_bytes().split(b"\0")
+                index = command.index(b"--model")
+                command_path = command[index + 1].decode("utf-8", errors="replace")
+            except (OSError, ValueError, IndexError):
+                pass
+        if state == "active" and active_path and command_path != str(active_path):
+            return "error", "Service model does not match the selected model; choose it again or restart AIA"
+        if state == "active" and self.server_ready():
+            return "ready", f"Service active (PID {pid}) · {active_path.name if active_path else 'no model path'}"
+        if state == "active":
+            return "starting", f"Service {substate}; local API is not ready yet"
+        return "error", f"Service {state}/{substate}; PID {pid}"
+
+    def set_model_error(self, message: str) -> None:
+        self.config["last_model_error"] = message
+        save_config(self.config)
+        audit("model-error", message)
+
+    def clear_model_error(self) -> None:
+        if self.config.get("last_model_error"):
+            self.config["last_model_error"] = ""
+            save_config(self.config)
+
+    def system_prompt(self) -> str:
+        active = self.active_model()
+        name = str(active["name"]) if active else "No active model"
+        status, detail = self.service_status()
+        integrations = self.config.get("integrations", {})
+        home_assistant = integrations.get("home-assistant", {}) if isinstance(integrations, dict) else {}
+        ha_status = str(home_assistant.get("_health", "not configured")) if isinstance(home_assistant, dict) else "not configured"
+        return (
+            "You are AIA, SHAI's concise local assistant. Answer only the current user question; do not repeat "
+            "an unrelated earlier answer. Use one or two direct sentences. Never claim to have executed commands, "
+            "changed the host, controlled devices, or accessed the internet. Propose actions for explicit user approval. "
+            "Ubuntu remains the host OS. "
+            f"Facts: selected local model is {name}; model service is {status} ({detail}); "
+            f"Home Assistant integration status is {ha_status}. "
+            "AIA can guide Home Assistant setup through its Integrations tab but cannot control devices without approval. "
+            "If a fact is not supplied here or by the user, say you do not know."
+        )
+
+    def request_completion(self, messages: list[dict[str, str]], max_tokens: int = 256) -> str:
+        payload = json.dumps({
+            "model": "local",
+            "messages": messages,
+            "max_tokens": max_tokens,
+            "temperature": 0.2,
+            "repeat_penalty": 1.15,
+            "repeat_last_n": 64,
+            "frequency_penalty": 0.2,
+            "stream": False,
+        }).encode("utf-8")
+        request = urllib.request.Request(
+            SERVER_URL + "/v1/chat/completions",
+            data=payload,
+            headers={"Authorization": f"Bearer {ensure_server_key()}", "Content-Type": "application/json"},
+            method="POST",
+        )
+        with urllib.request.urlopen(request, timeout=180) as response:
+            result = json.loads(response.read().decode("utf-8"))
+        try:
+            answer = result["choices"][0]["message"]["content"]
+        except (TypeError, KeyError, IndexError) as exc:
+            raise ValueError("model returned an invalid completion response") from exc
+        if not isinstance(answer, str) or not answer.strip():
+            raise ValueError("model returned an empty or non-text response")
+        return answer.strip()
+
     def update_active_header(self) -> None:
         active = self.active_model()
         self.active_header.set_text(f"Active: {active['name']}" if active else "Deterministic mode")
@@ -442,9 +581,10 @@ class AIAWindow(Gtk.ApplicationWindow):
         free_disk = int(self.hw["disk_free_mb"])
         if free_disk < int(model["disk_mb"]) * 2:
             return False, "Not enough free disk space"
-        if available - RESERVE_MB < needed:
-            return False, f"Constrained: needs about {needed} MB after a {RESERVE_MB} MB host reserve"
-        return True, "Fits current available memory and storage"
+        budget = max(0, min(int(self.hw["ram_total_mb"]) // 5, available - RESERVE_MB))
+        if needed > budget:
+            return False, f"Needs about {needed} MB; shared-host AI budget is {budget} MB (20% RAM target)"
+        return True, f"Fits shared-host AI budget ({budget} MB); CPU target 20%, memory safety ceiling 25%"
 
     def best_recommendation(self) -> dict[str, object]:
         fitting = [model for model in MODELS if self.fit(model)[0]]
@@ -461,6 +601,7 @@ class AIAWindow(Gtk.ApplicationWindow):
         )
         status = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
         status.add_css_class("panel")
+        service_state, service_detail = self.service_status()
         status.append(label(
             f"Mode: {active['name']}" if active else "Mode: deterministic bootstrap guidance",
             "good" if active else "warning",
@@ -469,12 +610,21 @@ class AIAWindow(Gtk.ApplicationWindow):
         spacer.set_hexpand(True)
         status.append(spacer)
         status.append(label(
-            "Persistent local model ready" if active and self.server_ready()
-            else "Persistent model service loading" if active
-            else "No model loaded",
-            "muted",
+            service_detail if active else "No model loaded",
+            "good" if service_state == "ready" else "warning" if service_state == "starting" else "critical",
         ))
         box.append(status)
+        actions = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        for title, callback in (("Choose model", lambda *_: self.show_tab("Models")),
+                                ("Control Center", lambda *_: self.show_tab("Control Center")),
+                                ("Open WebUI", self.open_webui)):
+            button = Gtk.Button(label=title)
+            button.connect("clicked", callback)
+            actions.append(button)
+        box.append(actions)
+        last_error = str(self.config.get("last_model_error", "")).strip()
+        if last_error:
+            box.append(label(f"Last model error: {last_error}", "critical", selectable=True))
 
         self.chat_view = Gtk.TextView()
         self.chat_view.set_editable(False)
@@ -507,8 +657,9 @@ class AIAWindow(Gtk.ApplicationWindow):
             return
         if not self.chat_messages:
             text = (
-                "AIA: I am ready in deterministic mode. I can summarize detected hardware, "
-                "explain model recommendations, and report local SHAI status without an LLM."
+                "AIA: I am your local AI assistant. I can inspect hardware, recommend and manage models, "
+                "and help configure integrations. Chat uses your active default model. "
+                "Review system actions in Control Center."
             )
         else:
             text = "\n\n".join(f"{role}: {message}" for role, message in self.chat_messages)
@@ -523,6 +674,13 @@ class AIAWindow(Gtk.ApplicationWindow):
         self.chat_entry.set_text("")
         self.chat_messages.append(("You", prompt))
         self.render_chat()
+        local_answer = self.local_status_answer(prompt)
+        if local_answer:
+            self.chat_messages.append(("AIA", local_answer))
+            self.render_chat()
+            self.record_chat()
+            audit("local-status-answer", "Answered from local configuration")
+            return
         active_path = self.active_path()
         if active_path and shutil.which("llama-server"):
             self.ensure_model_service()
@@ -530,11 +688,40 @@ class AIAWindow(Gtk.ApplicationWindow):
             self.send_button.set_sensitive(False)
             self.chat_messages.append(("AIA", "Thinking locally..."))
             self.render_chat()
-            threading.Thread(target=self.run_inference, args=(prompt,), daemon=True).start()
+            history = list(self.chat_messages[:-2])
+            threading.Thread(target=self.run_inference, args=(prompt, history), daemon=True).start()
         else:
-            self.chat_messages.append(("AIA", self.deterministic_answer(prompt)))
+            detail = "No active local model is configured" if not active_path else "llama-server is not installed"
+            self.set_model_error(detail)
+            if self.config.get("active_model"):
+                self.chat_messages.append(("AIA", f"Local model unavailable: {detail}. Open Models or Activity for the exact status."))
+            else:
+                self.chat_messages.append(("AIA", self.deterministic_answer(prompt)))
             self.render_chat()
             self.record_chat()
+
+    def local_status_answer(self, prompt: str) -> str:
+        """Answer local-status questions from SHAI state instead of asking a small model to guess."""
+        lowered = prompt.casefold()
+        integrations = self.config.get("integrations", {})
+        if not isinstance(integrations, dict):
+            integrations = {}
+        if "integrations" in lowered and any(word in lowered for word in ("list", "show", "what", "status")):
+            if not integrations:
+                return "AIA local status: no integrations are configured yet. Open Integrations to add Home Assistant or another local service."
+            lines = []
+            for integration_id, values in sorted(integrations.items()):
+                state = values.get("_health", "configured") if isinstance(values, dict) else "configured"
+                lines.append(f"{integration_id}: {state}")
+            return "AIA local integration status: " + "; ".join(lines) + "."
+        if "home assistant" in lowered and any(word in lowered for word in ("connect", "integrat", "status", "configured")):
+            values = integrations.get("home-assistant", {})
+            if not isinstance(values, dict) or not values:
+                return "AIA local status: Home Assistant is not configured. Open Integrations, enter its local URL and access token, then test the connection."
+            state = str(values.get("_health", "configured"))
+            message = str(values.get("_health_message", "No connection test has been run."))
+            return f"AIA local status: Home Assistant is {state}. {message}"
+        return ""
 
     def deterministic_answer(self, prompt: str) -> str:
         lowered = prompt.lower()
@@ -566,60 +753,79 @@ class AIAWindow(Gtk.ApplicationWindow):
             "from Models, or ask about detected hardware, model recommendations, SHAI status, or Home Assistant."
         )
 
-    def run_inference(self, prompt: str) -> None:
-        system = (
-            "You are AIA, the offline SHAI local assistant. Be concise and honest. Never claim to have "
-            "executed commands, changed the host, controlled devices, or accessed the internet. Propose actions "
-            "for explicit user approval. Ubuntu remains the host OS."
-        )
-        deadline = time.monotonic() + 90
-        while time.monotonic() < deadline and not self.server_ready():
-            time.sleep(1)
-        if not self.server_ready():
-            GLib.idle_add(self.finish_inference, "The persistent local model service did not become ready. Check AIA Activity for its service status.")
-            return
-        messages: list[dict[str, str]] = [{"role": "system", "content": system}]
-        for role, text in self.chat_messages[-10:-2]:
-            if text == "Thinking locally...":
-                continue
-            messages.append({"role": "user" if role == "You" else "assistant", "content": text})
-        messages.append({"role": "user", "content": prompt})
-        payload = json.dumps({
-            "model": "local",
-            "messages": messages,
-            "max_tokens": 256,
-            "temperature": 0.4,
-            "stream": False,
-        }).encode("utf-8")
-        request = urllib.request.Request(
-            SERVER_URL + "/v1/chat/completions",
-            data=payload,
-            headers={
-                "Authorization": f"Bearer {ensure_server_key()}",
-                "Content-Type": "application/json",
-            },
-            method="POST",
-        )
+    def run_inference(self, prompt: str, history: list[tuple[str, str]]) -> None:
         try:
-            with urllib.request.urlopen(request, timeout=180) as response:
-                result = json.loads(response.read().decode("utf-8"))
-            answer = str(result["choices"][0]["message"]["content"]).strip()
-            if not answer:
-                raise ValueError("model returned an empty response")
-        except (OSError, ValueError, KeyError, IndexError, json.JSONDecodeError, urllib.error.URLError) as exc:
-            answer = f"Local inference failed: {exc}"
-        GLib.idle_add(self.finish_inference, answer)
+            deadline = time.monotonic() + 90
+            while time.monotonic() < deadline and not self.server_ready():
+                time.sleep(1)
+            if not self.server_ready():
+                raise ValueError("The persistent local model service did not become ready. Check the model status above or AIA Activity.")
+            messages: list[dict[str, str]] = [{"role": "system", "content": self.system_prompt()}]
+            messages.append({"role": "user", "content": prompt})
+            answer = self.request_completion(messages)
+            previous = next((text for role, text in reversed(history) if role == "AIA"), "")
+            if previous and answer.casefold().strip() == previous.casefold().strip():
+                answer = self.request_completion([
+                    {"role": "system", "content": self.system_prompt()},
+                    {"role": "user", "content": f"Answer this new question directly and do not repeat the previous answer: {prompt}"},
+                ])
+        except (OSError, ValueError, TypeError, KeyError, IndexError, http.client.HTTPException) as exc:
+            message = f"Local inference failed: {exc}"
+            GLib.idle_add(self.finish_inference, message, message)
+            return
+        GLib.idle_add(self.finish_inference, answer, "")
 
-    def finish_inference(self, answer: str) -> bool:
+    def finish_inference(self, answer: str, error: str = "") -> bool:
         if self.chat_messages and self.chat_messages[-1] == ("AIA", "Thinking locally..."):
             self.chat_messages[-1] = ("AIA", answer)
         else:
             self.chat_messages.append(("AIA", answer))
         self.busy = False
         self.send_button.set_sensitive(True)
+        if error:
+            self.set_model_error(error)
+        else:
+            self.clear_model_error()
         self.render_chat()
         self.record_chat()
         audit("inference", f"Completed with active model {self.config.get('active_model')}")
+        return False
+
+    def test_active_model(self, _button: Gtk.Button) -> None:
+        if self.busy or not self.active_model():
+            return
+        self.busy = True
+        threading.Thread(target=self.run_model_test, daemon=True).start()
+
+    def run_model_test(self) -> None:
+        try:
+            system = self.system_prompt()
+            first = self.request_completion([
+                {"role": "system", "content": system},
+                {"role": "user", "content": "What is 7 plus 5? Answer concisely."},
+            ], max_tokens=48)
+            second = self.request_completion([
+                {"role": "system", "content": system},
+                {"role": "user", "content": "Name one primary color. Answer concisely."},
+            ], max_tokens=48)
+            if first.casefold().strip() == second.casefold().strip():
+                raise ValueError("model returned the same response to two distinct prompts")
+            result = f"Passed: {first[:72]} | {second[:72]}"
+            GLib.idle_add(self.finish_model_test, result, "")
+        except (OSError, ValueError, TypeError, KeyError, IndexError, http.client.HTTPException) as exc:
+            GLib.idle_add(self.finish_model_test, "Failed", str(exc))
+
+    def finish_model_test(self, result: str, error: str) -> bool:
+        self.busy = False
+        self.config["last_model_test"] = result
+        if error:
+            self.set_model_error(f"Model test failed: {error}")
+        else:
+            self.clear_model_error()
+        save_config(self.config)
+        audit("model-test", result if not error else f"failed | {error}")
+        if self.stack.get_visible_child_name() == "Chat":
+            self.build_chat()
         return False
 
     def record_chat(self) -> None:
@@ -633,19 +839,39 @@ class AIAWindow(Gtk.ApplicationWindow):
     def build_models(self) -> None:
         box = self.pages["Models"]
         self.clear(box)
+        self.hw = hardware()
         recommendation = self.best_recommendation()
         self.heading(
             box,
             "Model manager",
-            "Recommendations are based on currently available RAM and disk after a 1 GiB Ubuntu/automation reserve. Online actions are always labelled.",
+            "Model planning targets 20% of system RAM, leaving room for Ubuntu and other apps.",
         )
+        service_state, service_detail = self.service_status()
+        box.append(label(f"Model service: {service_detail}", "good" if service_state == "ready" else "warning" if service_state == "starting" else "critical"))
+        webui = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
+        webui.add_css_class("panel")
+        webui_copy = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
+        webui_copy.set_hexpand(True)
+        webui_copy.append(label("Optional browser interface", "section"))
+        webui_copy.append(label(
+            "Open WebUI is an optional local browser interface for this same AIA model service. "
+            "Install it from SHAPP in Advanced Docker architecture; AIA stays the primary SHAI assistant.",
+            "muted",
+        ))
+        webui.append(webui_copy)
+        open_shapp = Gtk.Button(label="Open SHAPP")
+        open_shapp.connect("clicked", lambda *_: self.launch_command(["shai-shapp"]))
+        webui.append(open_shapp)
+        open_webui = Gtk.Button(label="Open WebUI")
+        open_webui.connect("clicked", self.open_webui)
+        webui.append(open_webui)
         for model in MODELS:
             installed = model_path(model).is_file()
             active = self.config.get("active_model") == model["id"] and installed
             fits, reason = self.fit(model)
             card = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
             card.add_css_class("model-card")
-            if model["id"] == recommendation["id"]:
+            if active:
                 card.add_css_class("recommended")
             title_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
             title_row.append(label(f"{model['name']} ({model['params']})", "section"))
@@ -686,6 +912,135 @@ class AIAWindow(Gtk.ApplicationWindow):
         imported = Gtk.Button(label="Import local GGUF model")
         imported.connect("clicked", self.import_model)
         box.append(imported)
+        for item in self.config.get("imported_models", []):
+            if not isinstance(item, dict):
+                continue
+            card = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
+            card.add_css_class("model-card")
+            path = Path(str(item.get("path", "")))
+            active = item.get("id") == self.config.get("active_model")
+            if active:
+                card.add_css_class("recommended")
+            card.append(label(str(item.get("name", "Imported model")) + (" | Active default" if active else ""), "section"))
+            card.append(label(str(path) + (" | Available locally" if path.is_file() else " | File missing"), "muted"))
+            row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+            select = Gtk.Button(label="Use as default")
+            select.set_sensitive(path.is_file() and not active)
+            select.connect("clicked", lambda _b, model=item: self.make_default(model))
+            row.append(select)
+            remove = Gtk.Button(label="Remove from AIA")
+            remove.connect("clicked", lambda _b, model=item: self.remove_imported(model))
+            row.append(remove)
+            card.append(row)
+            box.append(card)
+        box.append(webui)
+
+    def open_webui(self, *_args: object) -> None:
+        try:
+            with socket.create_connection(("127.0.0.1", 3000), timeout=1):
+                pass
+        except OSError:
+            self.error("Open WebUI is not running locally. It is optional in SHAPP. Start it only on hardware with enough memory; AIA chat works without it.")
+            return
+        self.launch_command(["xdg-open", "http://127.0.0.1:3000"])
+
+    def remove_imported(self, model: dict[str, object]) -> None:
+        dialog = Gtk.MessageDialog(transient_for=self, modal=True, buttons=Gtk.ButtonsType.NONE,
+                                  text=f"Remove {model['name']} from AIA?",
+                                  secondary_text="The original GGUF file is preserved. Both AIA chat and Open WebUI will switch to the remaining default model.")
+        dialog.add_button("Cancel", Gtk.ResponseType.CANCEL)
+        dialog.add_button("Remove", Gtk.ResponseType.OK)
+        def confirmed(window: Gtk.Dialog, response: int) -> None:
+            window.destroy()
+            if response != Gtk.ResponseType.OK:
+                return
+            self.config["imported_models"] = [x for x in self.config.get("imported_models", []) if x.get("id") != model["id"]]
+            if self.config.get("active_model") == model["id"]:
+                remaining = installed_catalog_models()
+                self.config["active_model"] = max(remaining, key=lambda x: int(x["rank"]))["id"] if remaining else ""
+            save_config(self.config)
+            self.ensure_model_service(restart=True)
+            self.update_active_header()
+            self.build_models()
+        dialog.connect("response", confirmed)
+        dialog.present()
+
+    def build_control_center(self) -> None:
+        box = self.pages["Control Center"]
+        self.clear(box)
+        self.heading(box, "Control Center", "Live local service state and approval requests. No example devices or sample actions.")
+        row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        refresh = Gtk.Button(label="Refresh")
+        refresh.connect("clicked", lambda *_: self.build_control_center())
+        row.append(refresh)
+        restart = Gtk.Button(label="Restart active model service")
+        restart.set_sensitive(bool(self.active_model()) and not self.busy)
+        restart.connect("clicked", self.confirm_model_restart)
+        row.append(restart)
+        box.append(row)
+        state, detail = self.service_status()
+        box.append(label(f"Inference: {detail}", "good" if state == "ready" else "warning"))
+        try:
+            opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+            with opener.open(BROKER_URL + "/health", timeout=2) as response:
+                health = json.loads(response.read())
+            with opener.open(BROKER_URL + "/proposals", timeout=2) as response:
+                items = json.loads(response.read())["proposals"]
+            items = [item for item in items if item.get("source") != "diagnostic"]
+            box.append(label(f"Control broker: {health['status']}", "good"))
+        except (OSError, ValueError, KeyError) as exc:
+            box.append(label(f"Control broker unavailable: {exc}. Model management and local chat remain available.", "critical"))
+            return
+        pending = [item for item in items if item.get("status") == "pending"]
+        box.append(label(f"{len(pending)} pending approvals", "section"))
+        if not items:
+            box.append(label("No requests recorded. Real requests will appear here when submitted.", "muted"))
+        for item in sorted(items, key=lambda x: x.get("status") != "pending"):
+            card = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=7)
+            card.add_css_class("panel")
+            card.append(label(f"{item.get('action')} | {item.get('status')} | {item.get('risk', 'normal')} risk", "warning" if item.get("status") == "pending" else "muted"))
+            card.append(label(f"{item.get('reason', '')}\n{json.dumps(item.get('arguments', {}), sort_keys=True)}", selectable=True))
+            if item.get("status") == "pending":
+                buttons = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+                for title, decision in (("Review and approve", "approve"), ("Reject", "reject")):
+                    button = Gtk.Button(label=title)
+                    button.connect("clicked", lambda _b, entry=item, choice=decision: self.review_proposal(entry, choice))
+                    buttons.append(button)
+                card.append(buttons)
+            elif item.get("result"):
+                card.append(label(str(item["result"]), "muted", selectable=True))
+            box.append(card)
+
+    def confirm_model_restart(self, *_args: object) -> None:
+        dialog = Gtk.MessageDialog(transient_for=self, modal=True, buttons=Gtk.ButtonsType.OK_CANCEL,
+                                  text="Restart the active local model?", secondary_text="This interrupts any current inference. No download or model removal occurs.")
+        def confirmed(window: Gtk.Dialog, response: int) -> None:
+            window.destroy()
+            if response == Gtk.ResponseType.OK:
+                self.ensure_model_service(restart=True)
+                self.build_control_center()
+        dialog.connect("response", confirmed)
+        dialog.present()
+
+    def review_proposal(self, item: dict, decision: str) -> None:
+        dialog = Gtk.MessageDialog(transient_for=self, modal=True, buttons=Gtk.ButtonsType.OK_CANCEL,
+                                  text=f"{'Approve' if decision == 'approve' else 'Reject'} this {item.get('risk', 'normal')}-risk request?",
+                                  secondary_text=f"{item['action']}\n{json.dumps(item.get('arguments', {}), indent=2)}\n{item.get('reason', '')}")
+        def confirmed(window: Gtk.Dialog, response: int) -> None:
+            window.destroy()
+            if response != Gtk.ResponseType.OK:
+                return
+            def worker() -> None:
+                code, output = run(["pkexec", "/usr/lib/shai-installer/shai-control-approve", item["id"], decision], timeout=180)
+                def finished() -> bool:
+                    if code:
+                        self.error(output or "Authorization cancelled or control request failed.")
+                    self.build_control_center()
+                    return False
+                GLib.idle_add(finished)
+            threading.Thread(target=worker, daemon=True).start()
+        dialog.connect("response", confirmed)
+        dialog.present()
 
     def make_default(self, model: dict[str, object]) -> None:
         self.config["active_model"] = model["id"]
@@ -720,17 +1075,40 @@ class AIAWindow(Gtk.ApplicationWindow):
         DATA_DIR.mkdir(parents=True, exist_ok=True, mode=0o700)
         destination = model_path(model)
         script = STATE_DIR / "approved-model-install.sh"
-        body = f"""#!/usr/bin/env bash
+        body = textwrap.dedent(f"""\
+#!/usr/bin/env bash
 set -Eeuo pipefail
+trap 'printf "\\nInstallation failed on line %s. Review the error above.\\n" "$LINENO"; read -r -p "Press Enter to close..."' ERR
 printf '%s\\n' 'AIA approved online model installation' 'Source: {model['url']}' 'Destination: {destination}'
 sudo apt-get install -y llama.cpp wget ca-certificates
 install -d -m 0700 {shlex.quote(str(DATA_DIR))}
 wget -4 --https-only --continue --output-document={shlex.quote(str(destination) + '.part')} {shlex.quote(str(model['url']))}
+test "$(stat --format=%s {shlex.quote(str(destination) + '.part')})" -eq {int(model['bytes'])}
+printf '%s  %s\\n' '{model['sha256']}' {shlex.quote(str(destination) + '.part')} | sha256sum --check --status
 mv -- {shlex.quote(str(destination) + '.part')} {shlex.quote(str(destination))}
-sha256sum {shlex.quote(str(destination))} > {shlex.quote(str(destination) + '.sha256')}
-printf '%s\\n' 'Installation complete. The new model will become AIA default automatically.' 'This window will close in five seconds.'
+printf '%s  %s\\n' '{model['sha256']}' {shlex.quote(str(destination))} > {shlex.quote(str(destination) + '.sha256')}
+python3 - {shlex.quote(str(CONFIG_FILE))} {shlex.quote(str(model['id']))} <<'PY'
+import json
+import os
+import pathlib
+import sys
+path = pathlib.Path(sys.argv[1])
+config = json.loads(path.read_text(encoding="utf-8"))
+config["active_model"] = sys.argv[2]
+config["last_model_error"] = ""
+config["last_model_test"] = "Not run yet"
+temporary = path.with_suffix(".tmp")
+temporary.write_text(json.dumps(config, indent=2, sort_keys=True) + "\\n", encoding="utf-8")
+temporary.chmod(0o600)
+os.replace(temporary, path)
+PY
+systemctl --user daemon-reload
+systemctl --user enable --now {SERVER_SERVICE}
+systemctl --user restart {SERVER_SERVICE}
+systemctl --user is-active --quiet {SERVER_SERVICE}
+printf '%s\\n' 'Installation complete. Checksum verified, model activated, and local model service restarted.' 'This window will close in five seconds.'
 sleep 5
-"""
+""")
         script.write_text(body, encoding="utf-8")
         script.chmod(0o700)
         audit("install-approved", f"{model['id']} from {model['url']}")
@@ -738,11 +1116,19 @@ sleep 5
 
     def launch_terminal(self, script: Path) -> None:
         if shutil.which("ptyxis"):
-            subprocess.Popen(["ptyxis", "--", "bash", str(script)])
+            self.launch_command(["ptyxis", "--", "bash", str(script)])
         elif shutil.which("gnome-terminal"):
-            subprocess.Popen(["gnome-terminal", "--", "bash", str(script)])
+            self.launch_command(["gnome-terminal", "--", "bash", str(script)])
         else:
             self.error("No supported graphical terminal is installed.")
+
+    def launch_command(self, command: list[str]) -> bool:
+        try:
+            subprocess.Popen(command)
+            return True
+        except OSError as exc:
+            self.error(f"Could not launch {command[0]}: {exc}")
+            return False
 
     def confirm_remove(self, model: dict[str, object]) -> None:
         dialog = Gtk.MessageDialog(
@@ -787,8 +1173,16 @@ sleep 5
             selected = chooser.get_file().get_path()
             if selected:
                 source = Path(selected)
+                try:
+                    with source.open("rb") as stream:
+                        if stream.read(4) != b"GGUF":
+                            raise ValueError("This is not a GGUF model file.")
+                except (OSError, ValueError) as exc:
+                    self.error(str(exc))
+                    chooser.destroy()
+                    return
                 item = {
-                    "id": f"imported-{source.stem.lower().replace(' ', '-')}",
+                    "id": "imported-" + hashlib.sha256(str(source.resolve()).encode()).hexdigest()[:16],
                     "name": source.stem,
                     "path": str(source.resolve()),
                     "publisher": "User-provided",
@@ -808,7 +1202,10 @@ sleep 5
     def build_hardware(self) -> None:
         box = self.pages["Hardware"]
         self.clear(box)
-        self.heading(box, "Hardware profile", "Read locally when AIA started; no vendor lookup or online benchmark was performed.")
+        self.hw = hardware()
+        self.heading(box, "Hardware profile", "Local readings and a shared-host AI budget.")
+        columns = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=12)
+        columns.set_homogeneous(True)
         panel = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
         panel.add_css_class("panel")
         panel.append(label(
@@ -818,7 +1215,18 @@ sleep 5
             f"Runtime: {self.hw['runtime']}\nReserved for Ubuntu and automation: {RESERVE_MB / 1024:.1f} GiB",
             selectable=True,
         ))
-        box.append(panel)
+        columns.append(panel)
+        recommendation = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
+        recommendation.add_css_class("panel")
+        recommendation.append(label("Recommended model weight", "section"))
+        budget = max(0, min(int(self.hw["ram_total_mb"]) // 5, int(self.hw["ram_available_mb"]) - RESERVE_MB))
+        fitting = [model for model in MODELS if self.fit(model)[0]]
+        choice = max(fitting, key=lambda model: int(model["rank"])) if fitting else None
+        recommendation.append(label(f"AI RAM target: {budget} MB\nCPU target: 20% of host capacity\nInference memory ceiling: 25% of host RAM", "muted"))
+        recommendation.append(label(f"{choice['params']} parameters | Q4_K_M (mixed, roughly 4-bit)\n{choice['name']}\nEstimated runtime RAM: {choice['ram_mb']} MB" if choice else "No catalog model fits the current 20% budget. Use non-LLM local guidance or free memory first.", "good" if choice else "warning"))
+        recommendation.append(label("Estimates include runtime overhead, not just weight-file size. GPU/VRAM use is not enabled automatically.", "muted"))
+        columns.append(recommendation)
+        box.append(columns)
         refresh = Gtk.Button(label="Refresh local hardware reading")
         refresh.connect("clicked", self.refresh_hardware)
         box.append(refresh)
@@ -832,21 +1240,61 @@ sleep 5
         box = self.pages["Voice"]
         self.clear(box)
         self.heading(box, "Local voice", "Voice remains off until separately installed and granted microphone access.")
-        options = (
-            ("Speech-to-Phrase", "Best low-resource option for constrained Home Assistant commands", "Recommended on this VM"),
-            ("Piper", "Local text-to-speech output", "Fits this VM"),
-            ("Whisper", "General speech recognition with higher CPU and memory cost", "Use a tiny model on this VM"),
-            ("openWakeWord", "Local wake-word listener", "Requires a visible listening and mute state"),
-            ("Wyoming", "Local protocol linking voice components to Home Assistant", "Install with the selected voice stack"),
-        )
-        for name, description, status in options:
+        refresh = Gtk.Button(label="Refresh installed voice tools")
+        refresh.connect("clicked", lambda *_: self.build_voice())
+        box.append(refresh)
+        for spec in VOICE_OPTIONS:
+            managed = (VOICE_ROOT / str(spec["id"]) / "installed.json").is_file()
+            found = [path for cmd in spec["commands"] if (path := shutil.which(cmd))]
+            code, installed_packages = run(["dpkg-query", "-W", "-f=${binary:Package} ${db:Status-Abbrev}\\n", *spec["packages"]])
+            found += [line for line in installed_packages.splitlines() if " ii" in line]
+            python_packages = [str(dist.metadata.get("Name", "")) for dist in importlib.metadata.distributions()]
+            found += [name for name in python_packages if name.lower().replace('_', '-') in spec["packages"]]
             panel = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
             panel.add_css_class("panel")
-            panel.append(label(name, "section"))
-            panel.append(label(description, "muted"))
-            panel.append(label(status, "warning"))
+            panel.append(label(str(spec["name"]), "section"))
+            panel.append(label(str(spec["description"]), "muted"))
+            panel.append(label(f"Estimated runtime RAM: {spec['ram_mb']} MB | Install source: {'Ubuntu APT' if spec['id'] == 'espeak' else 'PyPI (isolated runtime)'}", "muted"))
+            panel.append(label("Installed by AIA" if managed else "Detected outside AIA: " + ", ".join(found) if found else "Not installed", "good" if managed or found else "muted"))
+            buttons = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+            action = Gtk.Button(label="Remove" if managed else "Install from online source")
+            budget = max(0, min(int(self.hw["ram_total_mb"]) // 5, int(self.hw["ram_available_mb"]) - RESERVE_MB))
+            fits = int(spec["ram_mb"]) <= budget and int(self.hw["disk_free_mb"]) > 2048
+            action.set_sensitive(managed or (not found and fits and bool(self.config.get("online_installs")) and VOICE_HELPER.exists()))
+            if not fits and not managed:
+                panel.append(label("Outside the current shared-host memory/storage budget.", "warning"))
+            action.set_tooltip_text("External installations are preserved; manage their removal in their original installer." if found and not managed else "Requires approval; executes in a visible terminal.")
+            action.connect("clicked", lambda _b, item=spec, remove=managed: self.voice_action(item, remove))
+            buttons.append(action)
+            panel.append(buttons)
             box.append(panel)
-        box.append(label("Voice installers are not enabled in this standalone test build; model and runtime management are ready for testing.", "muted"))
+        _, all_packages = run(["dpkg-query", "-W", "-f=${binary:Package} ${db:Status-Abbrev}\\n"])
+        known = {name for spec in VOICE_OPTIONS for name in spec["packages"]}
+        for entry in all_packages.splitlines():
+            name = entry.split()[0].split(":")[0] if entry.split() else ""
+            if " ii" in entry and name not in known and any(part in name for part in ("speech", "whisper", "piper", "espeak", "festival", "vosk", "wakeword", "wyoming", "orca")):
+                detected = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
+                detected.add_css_class("panel")
+                detected.append(label(name, "section"))
+                detected.append(label("Detected Ubuntu voice/accessibility component. Managed by Ubuntu; AIA will not remove it.", "muted"))
+                box.append(detected)
+        box.append(label("Speech-to-Phrase requires its dedicated trained home-automation setup; it is not installed as a generic Python speech engine.", "muted"))
+
+    def voice_action(self, spec: dict, remove: bool) -> None:
+        dialog = Gtk.MessageDialog(transient_for=self, modal=True, buttons=Gtk.ButtonsType.OK_CANCEL,
+                                  text=f"{'Remove' if remove else 'Install'} {spec['name']}?",
+                                  secondary_text="This removes only the AIA-managed installation, preserving voice data." if remove else "ONLINE: download from Ubuntu or PyPI in a visible terminal. No microphone, listening service, or model download is enabled automatically.")
+        def confirmed(window: Gtk.Dialog, response: int) -> None:
+            window.destroy()
+            if response != Gtk.ResponseType.OK:
+                return
+            STATE_DIR.mkdir(parents=True, exist_ok=True, mode=0o700)
+            script = STATE_DIR / "approved-voice-action.sh"
+            script.write_text("#!/usr/bin/env bash\nset -Eeuo pipefail\ntrap 'read -r -p \"Voice action failed. Review the error above; press Enter to close.\"' ERR\n" + shlex.join(["python3", str(VOICE_HELPER), "remove" if remove else "install", str(spec["id"])]) + "\n", encoding="utf-8")
+            script.chmod(0o700)
+            self.launch_terminal(script)
+        dialog.connect("response", confirmed)
+        dialog.present()
 
     def build_integrations(self) -> None:
         box = self.pages["Integrations"]
@@ -859,7 +1307,11 @@ sleep 5
         configured = self.config.get("integrations", {})
         if not isinstance(configured, dict):
             configured = {}
-        for spec in INTEGRATIONS:
+        add = Gtk.Button(label="Add custom integration")
+        add.connect("clicked", self.add_custom_integration)
+        box.append(add)
+        specs = [*INTEGRATIONS, *self.config.get("custom_integrations", [])]
+        for spec in specs:
             values = configured.get(spec["id"], {})
             card = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
             card.add_css_class("panel")
@@ -884,25 +1336,76 @@ sleep 5
             configure = Gtk.Button(label="Configure integration")
             configure.connect("clicked", lambda _button, item=spec: self.configure_integration(item))
             actions.append(configure)
+            if spec["kind"] == "exiftool":
+                guide = Gtk.Button(label="Open AI command guide")
+                guide.connect("clicked", lambda *_: self.launch_command(["xdg-open", "/usr/share/shai/integrations/exiftool/README.md"]))
+                actions.append(guide)
             if values:
                 test_button = Gtk.Button(label="Test connection")
                 test_button.connect("clicked", lambda _button, item=spec: self.test_saved_integration(item))
                 actions.append(test_button)
-            if spec["kind"] in {"ha", "endpoint", "sniffnet"}:
+            if spec["kind"] in {"ha", "endpoint", "sniffnet", "exiftool"}:
                 launch = Gtk.Button(label="Open" if spec["kind"] != "sniffnet" else "Launch Sniffnet")
-                launch.set_sensitive(bool(values) or spec["kind"] == "sniffnet")
+                launch.set_sensitive(bool(values) or spec["kind"] in {"sniffnet", "exiftool"})
                 launch.connect("clicked", lambda _button, item=spec: self.open_integration(item))
                 actions.append(launch)
             card.append(actions)
             box.append(card)
         box.append(label("High-impact device actions, locks, alarms, HVAC, valves, and relays always remain outside automatic AIA control.", "critical"))
 
+    def add_custom_integration(self, *_args: object) -> None:
+        dialog = Gtk.Dialog(title="Add custom integration", transient_for=self, modal=True)
+        dialog.add_button("Cancel", Gtk.ResponseType.CANCEL)
+        dialog.add_button("Add", Gtk.ResponseType.OK)
+        content = dialog.get_content_area()
+        content.set_spacing(8)
+        name = Gtk.Entry(placeholder_text="Application name")
+        content.append(name)
+        fields = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
+        content.append(fields)
+        rows = []
+        def add_field(*_args: object) -> None:
+            row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+            key = Gtk.Entry(placeholder_text="Field name (for example host)")
+            value = Gtk.Entry(placeholder_text="Value")
+            private = Gtk.CheckButton(label="Secret")
+            private.connect("toggled", lambda button: value.set_visibility(not button.get_active()))
+            row.append(key); row.append(value); row.append(private)
+            fields.append(row)
+            rows.append((key, value, private))
+        add_field()
+        another = Gtk.Button(label="Add field")
+        another.connect("clicked", add_field)
+        content.append(another)
+        error = label("", "critical")
+        content.append(error)
+        def save(window: Gtk.Dialog, response: int) -> None:
+            if response != Gtk.ResponseType.OK:
+                window.destroy(); return
+            app_name = name.get_text().strip()
+            names = [key.get_text().strip() for key, _, _ in rows]
+            if not app_name or len(set(names)) != len(names) or any(not key.isidentifier() or key.startswith('_') for key in names):
+                error.set_text("Supply an app name and unique field names containing letters, numbers or underscores."); return
+            integration_id = "custom-" + hashlib.sha256(app_name.encode()).hexdigest()[:12]
+            spec = {"id": integration_id, "name": app_name, "kind": "custom", "port": 0,
+                    "description": "User-defined configuration; no executable adapter is implied.",
+                    "fields": [{"key": key, "secret": private.get_active()} for key, (_, _, private) in zip(names, rows)]}
+            self.config.setdefault("custom_integrations", []).append(spec)
+            save_config(self.config)
+            entries = {key: value for key, (_, value, _) in zip(names, rows)}
+            self.integration_response(window, Gtk.ResponseType.OK, spec, entries)
+        dialog.connect("response", save)
+        dialog.present()
+
     def integration_application_status(self, spec: dict[str, object]) -> tuple[str, str]:
+        if spec["kind"] == "custom":
+            return "User-defined", "muted"
         integration_id = str(spec["id"])
         _, listeners = run(["ss", "-lntH"])
         if spec["port"] and f":{spec['port']}" in listeners:
             return "Running", "good"
         commands = {
+            "exiftool": ("exiftool",),
             "sniffnet": ("sniffnet",),
             "borgbackup": ("borg",),
             "mosquitto": ("mosquitto", "mosquitto_sub"),
@@ -940,7 +1443,8 @@ sleep 5
             "path": ("path",),
             "endpoint": ("host", "port"),
         }.get(str(kind), ())
-        missing = [key for key in required if not str(values.get(key, "")).strip()]
+        missing = [key for key in required if not str(values.get(key, "")).strip()
+                   and not (key == "token" and values.get("secret_ref"))]
         return ("Incomplete (" + ", ".join(missing) + " missing)", "warning") if missing else ("Complete", "good")
 
     @staticmethod
@@ -954,8 +1458,13 @@ sleep 5
 
     def integration_summary(self, spec: dict[str, object], values: dict[str, object]) -> str:
         kind = spec["kind"]
+        if kind == "custom":
+            fields = [f"{key}: {value}" for key, value in values.items() if not key.startswith('_') and key != "secret_ref"]
+            if values.get("secret_ref"):
+                fields.append("Secrets: stored in vault")
+            return " | ".join(fields) or "No values saved"
         if kind == "ha":
-            return f"URL: {values.get('url', 'not set')} | Token: {'stored privately' if values.get('token') else 'not set'}"
+            return f"URL: {values.get('url', 'not set')} | Token: {'stored in vault' if values.get('secret_ref') else 'not set'}"
         if kind == "mqtt":
             return f"Broker: {values.get('host', '127.0.0.1')}:{values.get('port', 1883)} | User: {values.get('username') or 'anonymous'}"
         if kind == "sniffnet":
@@ -966,6 +1475,10 @@ sleep 5
 
     def integration_fields(self, spec: dict[str, object]) -> list[tuple[str, str, str, bool]]:
         kind = spec["kind"]
+        if kind == "exiftool":
+            return [("path", "Default file or folder", str(Path.home()), False)]
+        if kind == "custom":
+            return [(field["key"], field["key"], "", bool(field["secret"])) for field in spec.get("fields", [])]
         if kind == "ha":
             return [
                 ("url", "Home Assistant URL", "http://127.0.0.1:8123", False),
@@ -994,7 +1507,7 @@ sleep 5
     def configure_integration(self, spec: dict[str, object]) -> None:
         dialog = Gtk.Dialog(title=f"Configure {spec['name']}", transient_for=self, modal=True)
         dialog.add_button("Cancel", Gtk.ResponseType.CANCEL)
-        dialog.add_button("Save and test", Gtk.ResponseType.OK)
+        dialog.add_button("Save configuration", Gtk.ResponseType.OK)
         content = dialog.get_content_area()
         content.set_spacing(10)
         content.set_margin_top(16)
@@ -1018,7 +1531,7 @@ sleep 5
             row.append(entry)
             content.append(row)
         content.append(label(
-            "Credentials are stored only in your private AIA configuration (mode 0600). The test contacts only this local destination.",
+            "Credentials are stored in the root-owned SHAI vault, not chat or AIA JSON. Leave a secret blank to keep the stored credential.",
             "muted",
         ))
         dialog.connect("response", lambda window, response: self.integration_response(window, response, spec, entries))
@@ -1038,25 +1551,55 @@ sleep 5
         integrations = self.config.get("integrations", {})
         if not isinstance(integrations, dict):
             integrations = {}
-        integrations[str(spec["id"])] = values
+        secret_keys = {"token", "password", "api_key", "secret"} | {field["key"] for field in spec.get("fields", []) if field.get("secret")}
+        private = {key: value for key, value in values.items() if key in secret_keys and value}
+        public_values = {key: value for key, value in values.items() if key not in secret_keys}
+        previous = integrations.get(str(spec["id"]), {})
+        if isinstance(previous, dict) and previous.get("secret_ref"):
+            public_values["secret_ref"] = previous["secret_ref"]
+        if private:
+            try:
+                result = subprocess.run(
+                    ["pkexec", "/usr/lib/shai-installer/shai-secret-store", pwd.getpwuid(os.getuid()).pw_name, str(spec["id"])],
+                    input=json.dumps(private), text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=90, check=False,
+                )
+            except (OSError, subprocess.TimeoutExpired) as exc:
+                self.integration_result(str(spec["name"]), f"The credential was not stored: {exc}", False); dialog.destroy(); return
+            if result.returncode != 0:
+                self.integration_result(str(spec["name"]), f"The credential was not stored in the SHAI vault: {result.stdout.strip()}", False); dialog.destroy(); return
+            public_values["secret_ref"] = f"vault://aia/{pwd.getpwuid(os.getuid()).pw_name}/{spec['id']}"
+        integrations[str(spec["id"])] = public_values
         self.config["integrations"] = integrations
         if spec["id"] == "home-assistant":
-            self.config["home_assistant_url"] = values.get("url", "http://127.0.0.1:8123")
-        result, success = self.test_integration(spec, values)
-        values["_health"] = "connected" if success else "attention"
-        values["_health_message"] = result
-        values["_tested_at"] = dt.datetime.now().astimezone().isoformat()
-        integrations[str(spec["id"])] = values
+            self.config["home_assistant_url"] = public_values.get("url", "http://127.0.0.1:8123")
         save_config(self.config)
-        audit("integration-configured", f"{spec['id']} | {'success' if success else 'failed'} | {result}")
+        result = "Configuration saved. Use Test connection separately when needed."
+        public_values["_health"] = "not-tested"
+        public_values["_health_message"] = result
+        integrations[str(spec["id"])] = public_values
+        save_config(self.config)
+        audit("integration-configured", f"{spec['id']} | saved")
         dialog.destroy()
-        self.integration_result(str(spec["name"]), result, success)
         self.build_integrations()
 
     def test_integration(self, spec: dict[str, object], values: dict[str, str]) -> tuple[str, bool]:
         kind = spec["kind"]
         try:
+            if kind == "exiftool":
+                code, version = run(["exiftool", "-ver"])
+                return f"Local ExifTool version: {version}", code == 0
             if kind == "ha":
+                if values.get("secret_ref") and not values.get("token"):
+                    opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+                    request = urllib.request.Request(
+                        BROKER_URL + "/integrations/home-assistant/test",
+                        headers={"X-SHAI-User": pwd.getpwuid(os.getuid()).pw_name},
+                    )
+                    with opener.open(request, timeout=10) as response:
+                        result = json.loads(response.read())
+                    if not isinstance(result, dict):
+                        raise ValueError("broker returned an invalid test response")
+                    return str(result.get("detail", "Test failed")), bool(result.get("success"))
                 url = values.get("url", "http://127.0.0.1:8123").rstrip("/") + "/api/"
                 token = values.get("token", "")
                 headers = {"Authorization": f"Bearer {token}"} if token else {}
@@ -1081,7 +1624,7 @@ sleep 5
             port = int(values.get("port", str(spec["port"])))
             with ipv4_connection(host, port):
                 return f"Local service accepted a connection at {host}:{port}.", True
-        except (OSError, ValueError, urllib.error.URLError) as exc:
+        except (OSError, ValueError, TypeError, OverflowError, http.client.HTTPException) as exc:
             return f"Connection test failed: {exc}", False
 
     def zigbee_health(self, values: dict[str, str]) -> str:
@@ -1128,6 +1671,9 @@ sleep 5
         self.build_integrations()
 
     def open_integration(self, spec: dict[str, object]) -> None:
+        if spec["kind"] == "exiftool":
+            self.launch_command(["shai-metadata"])
+            return
         configured = self.config.get("integrations", {})
         values = configured.get(spec["id"], {}) if isinstance(configured, dict) else {}
         if spec["kind"] == "sniffnet":
@@ -1138,8 +1684,8 @@ sleep 5
             command = [executable]
             if values.get("adapter"):
                 command.extend(["--adapter", str(values["adapter"])])
-            subprocess.Popen(command)
-            audit("integration-opened", "sniffnet")
+            if self.launch_command(command):
+                audit("integration-opened", "sniffnet")
             return
         if spec["kind"] == "ha":
             url = str(values.get("url", self.config.get("home_assistant_url", "http://127.0.0.1:8123")))
@@ -1147,8 +1693,8 @@ sleep 5
             host = str(values.get("host", "127.0.0.1"))
             port = str(values.get("port", spec["port"]))
             url = f"http://{host}:{port}"
-        subprocess.Popen(["xdg-open", url])
-        audit("integration-opened", str(spec["id"]))
+        if self.launch_command(["xdg-open", url]):
+            audit("integration-opened", str(spec["id"]))
 
     def build_activity(self) -> None:
         box = self.pages["Activity"]
@@ -1157,7 +1703,7 @@ sleep 5
         path = LOG_DIR / f"{dt.date.today().isoformat()}.log"
         box.append(label(read_text(str(path)) or "No activity recorded today.", "panel", selectable=True))
         open_logs = Gtk.Button(label="Open activity folder")
-        open_logs.connect("clicked", lambda *_: subprocess.Popen(["xdg-open", str(LOG_DIR)]))
+        open_logs.connect("clicked", lambda *_: self.launch_command(["xdg-open", str(LOG_DIR)]))
         box.append(open_logs)
 
     def build_settings(self) -> None:
@@ -1195,7 +1741,8 @@ sleep 5
         clear_chat.add_css_class("destructive-action")
         clear_chat.connect("clicked", self.clear_chat)
         actions.append(clear_chat)
-        reset_model = Gtk.Button(label="Reset active model")
+        reset_model = Gtk.Button(label="Unload active model")
+        reset_model.set_tooltip_text("Clears the default and stops inference. No model files are deleted.")
         reset_model.add_css_class("destructive-action")
         reset_model.connect("clicked", self.reset_model)
         actions.append(reset_model)
@@ -1227,26 +1774,33 @@ sleep 5
             self.build_settings()
 
     def reset_model(self, _button: Gtk.Button) -> None:
-        self.config["active_model"] = ""
-        save_config(self.config)
-        self.ensure_model_service()
-        audit("model-reset", "Active model selection reset; model files retained")
-        self.update_active_header()
-        self.build_settings()
+        dialog = Gtk.MessageDialog(transient_for=self, modal=True, buttons=Gtk.ButtonsType.OK_CANCEL,
+                                  text="Unload the active model?", secondary_text="Inference stops for AIA and Open WebUI. Installed model files remain. Select a default in Models to resume.")
+        def confirmed(window: Gtk.Dialog, response: int) -> None:
+            window.destroy()
+            if response != Gtk.ResponseType.OK:
+                return
+            self.config["active_model"] = ""
+            save_config(self.config)
+            self.ensure_model_service()
+            audit("model-reset", "Active model selection reset; model files retained")
+            self.update_active_header()
+            self.build_settings()
+        dialog.connect("response", confirmed)
+        dialog.present()
 
     def scan_timer(self) -> bool:
-        installed = {str(item["id"]) for item in installed_catalog_models()}
-        new = installed - self.last_installed
-        if new:
-            candidates = [item for item in MODELS if item["id"] in installed]
-            promoted = max(candidates, key=lambda item: int(item["rank"]))
-            self.config["active_model"] = promoted["id"]
-            save_config(self.config)
-            self.ensure_model_service(restart=True)
-            audit("model-auto-promoted", str(promoted["name"]))
+        fresh_config = load_config()
+        if fresh_config != self.config:
+            self.config = fresh_config
             self.update_active_header()
-            if self.stack.get_visible_child_name() == "Models":
+            if self.stack.get_visible_child_name() == "Chat":
+                self.build_chat()
+            elif self.stack.get_visible_child_name() == "Models":
                 self.build_models()
+        installed = {str(item["id"]) for item in installed_catalog_models()}
+        if installed != self.last_installed and self.stack.get_visible_child_name() == "Models":
+            self.build_models()
         self.last_installed = installed
         return True
 
@@ -1261,7 +1815,15 @@ sleep 5
 
 class AIAApplication(Gtk.Application):
     def __init__(self) -> None:
-        super().__init__(application_id=APP_ID, flags=Gio.ApplicationFlags.DEFAULT_FLAGS)
+        GLib.set_prgname(APP_ID)
+        GLib.set_application_name("AIA AI Assistant")
+        super().__init__(application_id=APP_ID, flags=Gio.ApplicationFlags.HANDLES_COMMAND_LINE)
+
+    def do_command_line(self, command_line: Gio.ApplicationCommandLine) -> int:
+        self.activate()
+        if "--control-center" in command_line.get_arguments():
+            self.props.active_window.show_tab("Control Center")
+        return 0
 
     def do_startup(self) -> None:
         Gtk.Application.do_startup(self)

@@ -17,14 +17,28 @@
       "image": "eclipse-mosquitto:2.0.21-openssl",
       "minimum_ram_mb": 64,
       "minimum_disk_mb": 256,
-      "ports": [{"port": 1883, "protocol": "tcp", "scope": "internal", "purpose": "MQTT messaging for SHAI automation services"}]
+      "ports": [
+        {
+          "port": 1883,
+          "protocol": "tcp",
+          "scope": "internal",
+          "purpose": "MQTT messaging for SHAI automation services"
+        }
+      ]
     },
     "home-assistant": {
       "name": "Home Assistant",
       "image": "ghcr.io/home-assistant/home-assistant:2026.9.3",
       "minimum_ram_mb": 1024,
       "minimum_disk_mb": 4096,
-      "ports": [{"port": 8123, "protocol": "tcp", "scope": "loopback", "purpose": "Home Assistant web interface"}]
+      "ports": [
+        {
+          "port": 8123,
+          "protocol": "tcp",
+          "scope": "loopback",
+          "purpose": "Home Assistant web interface"
+        }
+      ]
     },
     "zigbee2mqtt": {
       "name": "Zigbee2MQTT",
@@ -32,7 +46,373 @@
       "minimum_ram_mb": 256,
       "minimum_disk_mb": 1024,
       "requires_serial_by_id": true,
-      "ports": [{"port": 8080, "protocol": "tcp", "scope": "loopback", "purpose": "Zigbee2MQTT management interface"}]
+      "ports": [
+        {
+          "port": 8080,
+          "protocol": "tcp",
+          "scope": "loopback",
+          "purpose": "Zigbee2MQTT management interface"
+        }
+      ]
+    },
+    "open-webui": {
+      "name": "Open WebUI",
+      "image": "ghcr.io/open-webui/open-webui:v0.12.5-slim",
+      "minimum_ram_mb": 384,
+      "minimum_disk_mb": 600,
+      "ports": [
+        {
+          "port": 3000,
+          "protocol": "tcp",
+          "scope": "loopback",
+          "purpose": "Optional local browser interface for AIA's local model"
+        }
+      ]
+    },
+    "esphome": {
+      "name": "ESPHome",
+      "image": "ghcr.io/esphome/esphome:stable",
+      "minimum_ram_mb": 384,
+      "minimum_disk_mb": 1536,
+      "ports": [
+        {
+          "port": 6052,
+          "protocol": "tcp",
+          "scope": "loopback",
+          "purpose": "ESPHome local administration"
+        }
+      ],
+      "generic": {
+        "container_port": 6052,
+        "mounts": [
+          {
+            "target": "/config",
+            "folder": "config"
+          }
+        ],
+        "outbound": false,
+        "uid": null
+      }
+    },
+    "zwavejs": {
+      "name": "Z-Wave JS UI",
+      "image": "ghcr.io/zwave-js/zwave-js-ui:11.25.2",
+      "minimum_ram_mb": 256,
+      "minimum_disk_mb": 1024,
+      "ports": [
+        {
+          "port": 8091,
+          "protocol": "tcp",
+          "scope": "loopback",
+          "purpose": "Z-Wave JS UI local administration"
+        }
+      ],
+      "generic": {
+        "container_port": 8091,
+        "mounts": [
+          {
+            "target": "/usr/src/app/store",
+            "folder": "store"
+          }
+        ],
+        "outbound": false,
+        "uid": null
+      }
+    },
+    "jellyfin": {
+      "name": "Jellyfin Media Server",
+      "image": "jellyfin/jellyfin:latest",
+      "minimum_ram_mb": 1200,
+      "minimum_disk_mb": 2048,
+      "ports": [
+        {
+          "port": 8096,
+          "protocol": "tcp",
+          "scope": "loopback",
+          "purpose": "Jellyfin Media Server local administration"
+        }
+      ],
+      "generic": {
+        "container_port": 8096,
+        "mounts": [
+          {
+            "target": "/config",
+            "folder": "config"
+          },
+          {
+            "target": "/cache",
+            "folder": "cache"
+          },
+          {
+            "target": "/media",
+            "folder": "media"
+          }
+        ],
+        "outbound": false,
+        "uid": null
+      }
+    },
+    "node-red": {
+      "name": "Node-RED",
+      "image": "nodered/node-red:latest",
+      "minimum_ram_mb": 320,
+      "minimum_disk_mb": 1024,
+      "ports": [
+        {
+          "port": 1880,
+          "protocol": "tcp",
+          "scope": "loopback",
+          "purpose": "Node-RED local administration"
+        }
+      ],
+      "generic": {
+        "container_port": 1880,
+        "mounts": [
+          {
+            "target": "/data",
+            "folder": "data"
+          }
+        ],
+        "outbound": false,
+        "uid": 1000
+      }
+    },
+    "openhab": {
+      "name": "openHAB",
+      "image": "openhab/openhab:latest",
+      "minimum_ram_mb": 900,
+      "minimum_disk_mb": 1500,
+      "ports": [
+        {
+          "port": 18080,
+          "protocol": "tcp",
+          "scope": "loopback",
+          "purpose": "openHAB local administration"
+        }
+      ],
+      "generic": {
+        "container_port": 8080,
+        "mounts": [
+          {
+            "target": "/openhab/conf",
+            "folder": "conf"
+          },
+          {
+            "target": "/openhab/userdata",
+            "folder": "userdata"
+          },
+          {
+            "target": "/openhab/addons",
+            "folder": "addons"
+          }
+        ],
+        "outbound": false,
+        "uid": null
+      }
+    },
+    "plex": {
+      "name": "Plex Media Server",
+      "image": "plexinc/pms-docker:latest",
+      "minimum_ram_mb": 1200,
+      "minimum_disk_mb": 2048,
+      "ports": [
+        {
+          "port": 32400,
+          "protocol": "tcp",
+          "scope": "loopback",
+          "purpose": "Plex Media Server local administration"
+        }
+      ],
+      "generic": {
+        "container_port": 32400,
+        "mounts": [
+          {
+            "target": "/config",
+            "folder": "config"
+          },
+          {
+            "target": "/data",
+            "folder": "media"
+          },
+          {
+            "target": "/transcode",
+            "folder": "transcode"
+          }
+        ],
+        "outbound": true,
+        "uid": null
+      }
+    },
+    "emby": {
+      "name": "Emby Media Server",
+      "image": "emby/embyserver:latest",
+      "minimum_ram_mb": 1200,
+      "minimum_disk_mb": 2048,
+      "ports": [
+        {
+          "port": 8097,
+          "protocol": "tcp",
+          "scope": "loopback",
+          "purpose": "Emby Media Server local administration"
+        }
+      ],
+      "generic": {
+        "container_port": 8096,
+        "mounts": [
+          {
+            "target": "/config",
+            "folder": "config"
+          },
+          {
+            "target": "/mnt/share",
+            "folder": "media"
+          }
+        ],
+        "outbound": false,
+        "uid": null
+      }
+    },
+    "navidrome": {
+      "name": "Navidrome Music Server",
+      "image": "deluan/navidrome:latest",
+      "minimum_ram_mb": 150,
+      "minimum_disk_mb": 300,
+      "ports": [
+        {
+          "port": 4533,
+          "protocol": "tcp",
+          "scope": "loopback",
+          "purpose": "Navidrome Music Server local administration"
+        }
+      ],
+      "generic": {
+        "container_port": 4533,
+        "mounts": [
+          {
+            "target": "/data",
+            "folder": "data"
+          },
+          {
+            "target": "/music",
+            "folder": "media"
+          }
+        ],
+        "outbound": false,
+        "uid": 1000
+      }
+    },
+    "adguard-home": {
+      "name": "AdGuard Home",
+      "image": "adguard/adguardhome:latest",
+      "minimum_ram_mb": 200,
+      "minimum_disk_mb": 250,
+      "ports": [
+        {
+          "port": 3001,
+          "protocol": "tcp",
+          "scope": "loopback",
+          "purpose": "AdGuard Home local administration"
+        }
+      ],
+      "generic": {
+        "container_port": 3000,
+        "mounts": [
+          {
+            "target": "/opt/adguardhome/work",
+            "folder": "work"
+          },
+          {
+            "target": "/opt/adguardhome/conf",
+            "folder": "conf"
+          }
+        ],
+        "outbound": false,
+        "uid": null
+      }
+    },
+    "pi-hole": {
+      "name": "Pi-hole",
+      "image": "pihole/pihole:latest",
+      "minimum_ram_mb": 300,
+      "minimum_disk_mb": 500,
+      "ports": [
+        {
+          "port": 8082,
+          "protocol": "tcp",
+          "scope": "loopback",
+          "purpose": "Pi-hole local administration"
+        }
+      ],
+      "generic": {
+        "container_port": 80,
+        "mounts": [
+          {
+            "target": "/etc/pihole",
+            "folder": "config"
+          }
+        ],
+        "outbound": false,
+        "uid": null
+      }
+    },
+    "matter-server": {
+      "name": "Matter Server and Thread Support",
+      "image": "ghcr.io/matter-js/matterjs-server:stable",
+      "minimum_ram_mb": 384,
+      "minimum_disk_mb": 1024,
+      "ports": [
+        {
+          "port": 5580,
+          "protocol": "tcp",
+          "scope": "loopback",
+          "purpose": "Matter Server and Thread Support local administration"
+        }
+      ],
+      "generic": {
+        "container_port": 5580,
+        "mounts": [
+          {
+            "target": "/data",
+            "folder": "data"
+          }
+        ],
+        "outbound": false,
+        "uid": null,
+        "download_only": true
+      }
+    },
+    "emoncms": {
+      "name": "Emoncms Energy Monitoring",
+      "image": "openenergymonitor/emoncms:latest",
+      "minimum_ram_mb": 1100,
+      "minimum_disk_mb": 5120,
+      "ports": [
+        {
+          "port": 8099,
+          "protocol": "tcp",
+          "scope": "loopback",
+          "purpose": "Emoncms Energy Monitoring local administration"
+        }
+      ],
+      "generic": {
+        "container_port": 80,
+        "mounts": [
+          {
+            "target": "/var/opt/emoncms/phpfina",
+            "folder": "phpfina"
+          },
+          {
+            "target": "/var/opt/emoncms/phptimeseries",
+            "folder": "phptimeseries"
+          }
+        ],
+        "outbound": false,
+        "uid": null
+      },
+      "components": {
+        "db": "mariadb:11.8",
+        "redis": "redis:8"
+      }
     }
   }
 }

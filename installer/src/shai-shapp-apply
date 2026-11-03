@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import datetime as dt
+import fcntl
 import json
 import os
 import pwd
@@ -25,6 +26,7 @@ PACKAGE_RE = re.compile(r"^[a-z0-9][a-z0-9+.-]{0,127}(?::[a-z0-9]+)?$")
 PLAN_RE = re.compile(r"^[a-f0-9-]{16,64}$")
 USER_RE = re.compile(r"^[a-z_][a-z0-9_-]{0,31}$")
 PROTECTED_SNAPS = {"firefox", "snap-store", "firmware-updater", "desktop-security-center"}
+LOG_USER = None
 
 
 class PlanRejected(Exception):
@@ -37,12 +39,19 @@ def fail(message: str) -> "NoReturn":
 
 def run(args: list[str], *, capture: bool = False) -> subprocess.CompletedProcess[str]:
     print("+", " ".join(args), flush=True)
-    return subprocess.run(
-        args,
-        check=True,
-        text=True,
-        stdout=subprocess.PIPE if capture else None,
-    )
+    process = subprocess.Popen(args, text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+    output = []
+    for line in process.stdout:
+        print(line, end='', flush=True)
+        output.append(line)
+    process.stdout.close()
+    code = process.wait()
+    text = ''.join(output)
+    if LOG_USER:
+        audit(LOG_USER, 'COMMAND_OUTPUT', 'terminal', args[0], text[-16000:])
+    if code:
+        raise subprocess.CalledProcessError(code, args, output=text)
+    return subprocess.CompletedProcess(args, code, stdout=text)
 
 
 def read_secure_plan(path: str) -> tuple[dict[str, object], os.stat_result]:
@@ -149,6 +158,19 @@ def write_result(
 def main() -> int:
     if os.geteuid() != 0:
         fail("run through the visible sudo terminal opened by SHAPP")
+    STATE.mkdir(parents=True, exist_ok=True)
+    with (STATE / 'shapp-apply.lock').open('a') as lock:
+        try:
+            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            fail('another SHAPP apply is still running; wait before retrying')
+        return apply_plan()
+
+
+def apply_plan() -> int:
+    global LOG_USER
+    if os.geteuid() != 0:
+        fail("run through the visible sudo terminal opened by SHAPP")
     if len(sys.argv) != 2:
         fail("usage: shai-shapp-apply PLAN.json")
     data, info = read_secure_plan(sys.argv[1])
@@ -156,7 +178,9 @@ def main() -> int:
         "schema", "plan_id", "target_user", "architecture",
         "install", "remove_apt", "remove_snap", "remove_container",
     }
-    if set(data) != expected or data.get("schema") != 3:
+    if data.get('schema') == 4:
+        expected.add('remove_managed')
+    if set(data) != expected or data.get("schema") not in {3, 4}:
         fail("unexpected plan schema or fields")
     plan_id = data.get("plan_id")
     user = data.get("target_user")
@@ -171,9 +195,13 @@ def main() -> int:
         account = pwd.getpwnam(user)
     except KeyError:
         fail("target user does not exist")
+    if account.pw_uid < 1000:
+        fail("a regular desktop target user is required")
     if info.st_uid != account.pw_uid:
         fail("plan owner does not match target user")
-    for field in ("install", "remove_apt", "remove_snap", "remove_container"):
+    LOG_USER = user
+    data.setdefault('remove_managed', [])
+    for field in ("install", "remove_apt", "remove_snap", "remove_container", 'remove_managed'):
         value = data.get(field)
         if not isinstance(value, list) or any(not isinstance(item, str) for item in value):
             fail(f"{field} must be a list of strings")
@@ -195,6 +223,11 @@ def main() -> int:
         item_id for item_id in install_ids
         if not (architecture == "managed-stack" and catalog[item_id].get("container_service"))
     ]
+    host_ids = [app_id for app_id in apt_install_ids if catalog[app_id].get('host_backend')]
+    apt_install_ids = [app_id for app_id in apt_install_ids if app_id not in host_ids]
+    allowed_host = {app_id for app_id, entry in catalog.items() if entry.get('host_backend')}
+    if not set(data['remove_managed']) <= allowed_host:
+        fail('Unknown managed-host app removal')
     install_packages = sorted({
         package for item_id in apt_install_ids for package in catalog[item_id]["packages"]
     })
@@ -214,6 +247,10 @@ def main() -> int:
         fail(f"unsupported SHAI stack service: {', '.join(invalid_services)}")
     if architecture != "managed-stack" and install_containers:
         fail("container installation requires Advanced managed-stack architecture")
+    if (set(install_packages) & set(remove_apt)
+            or set(install_containers) & set(remove_containers)
+            or set(host_ids) & set(data['remove_managed'])):
+        fail("the same application cannot be installed and removed in one plan")
     for package in install_packages + remove_apt + remove_snap:
         if not PACKAGE_RE.fullmatch(package):
             fail(f"invalid package name: {package}")
@@ -225,7 +262,7 @@ def main() -> int:
             fail(f"APT package is not a visible installed application: {package}")
         if is_protected(package, patterns):
             fail(f"protected Ubuntu component cannot be removed: {package}")
-    snaps = installed_snaps()
+    snaps = installed_snaps() if remove_snap else set()
     for package in remove_snap:
         if package not in snaps:
             fail(f"Snap is not installed: {package}")
@@ -245,7 +282,7 @@ def main() -> int:
     )
     try:
         if install_packages:
-            run(["apt-get", "update"])
+            run(["apt-get", '-o', 'Acquire::ForceIPv4=true', "update"])
         if specs:
             simulation = run(["apt-get", "-s", "install", "--", *specs], capture=True).stdout
             print(simulation)
@@ -257,7 +294,11 @@ def main() -> int:
             blocked = sorted({package for package in removed if is_protected(package, patterns)})
             if blocked:
                 fail(f"APT simulation would remove protected components: {', '.join(blocked)}")
-            run(["apt-get", "-y", "install", "--", *specs])
+            unapproved = sorted(set(removed) - {package.split(':', 1)[0] for package in remove_apt})
+            if unapproved:
+                fail(f"APT simulation would remove unapproved applications: {', '.join(unapproved)}")
+            no_remove = [] if remove_apt else ['--no-remove']
+            run(["apt-get", '-o', 'Acquire::ForceIPv4=true', *no_remove, "-y", "install", "--", *specs])
             for package in install_packages:
                 audit(user, "INSTALLED", "apt", package, f"approved SHAPP plan {plan_id}")
             for package in remove_apt:
@@ -266,6 +307,7 @@ def main() -> int:
             run(["snap", "remove", package])
             audit(user, "UNINSTALLED", "snap", package, f"approved SHAPP plan {plan_id}")
         if install_containers or remove_containers:
+            os.environ['SUDO_USER'] = user
             run([
                 str(STACK_APPLY),
                 "--install", ",".join(install_containers),
@@ -275,9 +317,16 @@ def main() -> int:
                 audit(user, "INSTALLED", "container", service, f"approved SHAPP plan {plan_id}")
             for service in remove_containers:
                 audit(user, "UNINSTALLED", "container", service, f"approved SHAPP plan {plan_id}; data preserved")
+        for action, ids in [('remove', data['remove_managed']), ('install', host_ids)]:
+            for app_id in ids:
+                run([str(LIB / 'shai-app-install'), action, app_id, '--user', user])
+                audit(user, 'INSTALLED' if action == 'install' else 'UNINSTALLED', 'managed', app_id, f'approved SHAPP plan {plan_id}')
     except (subprocess.CalledProcessError, OSError, PlanRejected) as exc:
-        audit(user, "FAILED", "shapp", plan_id, str(exc))
-        write_result(plan_id, "failure", f"Package operation stopped: {exc}", account)
+        detail = str(exc) + '\n' + str(getattr(exc, 'output', '') or '')[-2000:]
+        if 'not valid yet' in detail:
+            detail += '\nUbuntu rejected repository dates: check the host clock/NTP or Hyper-V time synchronization. Do not disable APT date or signature verification.'
+        audit(user, "FAILED", "shapp", plan_id, detail)
+        write_result(plan_id, "failure", f"Package operation stopped: {detail}", account)
         raise
     audit(user, "COMPLETED", "shapp", plan_id, "All selected package changes completed")
     write_result(plan_id, "success", "All selected package changes completed.", account)

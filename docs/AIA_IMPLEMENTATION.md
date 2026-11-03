@@ -1,5 +1,12 @@
 # AIA implementation
 
+## Inspector policy
+
+AIA is SHAI's read-only inspector and configuration assistant. It can report
+hardware, services, integrations, and model status, but it does not execute
+host or smart-home controls from chat. Advanced local models in Open WebUI use
+the separately approved SHAI Control Broker; see `AIA_CONTROL_BROKER.md`.
+
 AIA is SHAI's offline-first local model advisor and assistant. It is installed
 as `/usr/bin/shai-aia` only when the user selects local AI during Setup.
 
@@ -10,7 +17,8 @@ as `/usr/bin/shai-aia` only when the user selects local AI during Setup.
 - Starts in deterministic mode and recommends models against a one-GiB reserve
   for Ubuntu and automation services.
 - Offers SmolLM2 135M as the bootstrap fallback, SmolLM2 360M as a light
-  upgrade, and Llama 3.2 1B when current capacity permits.
+  fallback, Qwen 2.5 0.5B as the preferred lightweight default, and Llama 3.2
+  1B when current capacity permits.
 - Requires an AIA confirmation before opening a visible installation terminal.
   The reviewed command then runs automatically, with Ubuntu sudo authentication
   remaining visible when required.
@@ -26,6 +34,14 @@ as `/usr/bin/shai-aia` only when the user selects local AI during Setup.
 - Exposes llama.cpp only on `127.0.0.1:11435`, disables its web UI, and requires
   a private per-user API key. AIA uses the structured chat-completions endpoint
   so runtime diagnostics never become chat messages.
+- Shows the active model, persistent-service state and PID, the last model-test
+  result, and the last actionable model error in the chat surface.
+- Tests the active model against two distinct local prompts. A passed test means
+  the local API returned two non-empty, distinct answers; it does not claim that
+  a small model is factually reliable.
+- Pins every catalog download to an exact file size and SHA-256 from its stated
+  Hugging Face source. The approved terminal flow validates both before making a
+  model active and restarting the persistent service.
 - Provides independent Application, Configuration, and Integration statuses for
   every SHAPP recommended integration, plus configure and retest workflows.
 - Uses Home Assistant's token-authenticated REST endpoint, MQTT for Mosquitto
