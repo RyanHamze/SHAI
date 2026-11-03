@@ -8,6 +8,7 @@ import configparser
 import datetime as dt
 import json
 import os
+import platform
 import re
 import shlex
 import shutil
@@ -27,6 +28,7 @@ from gi.repository import Gdk, Gio, GLib, Gtk  # noqa: E402
 APP_ID = "com.aabey.shai.Shapp"
 LIB = Path(os.environ.get("SHAI_INSTALLER_LIB", "/usr/lib/shai-installer"))
 CATALOG = LIB / "catalog/shapp-apps.json"
+STACK_CATALOG = LIB / "catalog/shai-stack-services.json"
 PROTECTED = LIB / "PROTECTED_PACKAGES.regex"
 RESULT = Path("/var/lib/shai-installer/shapp-result.json")
 SETUP_CHOICES = Path("/var/lib/shai-installer/setup-choices.json")
@@ -38,6 +40,11 @@ CART_TEXT_CHARS = 34
 LOG_DIR = Path.home() / ".local/state/shai/shapp/logs"
 
 CSS = b"""
+headerbar, headerbar.titlebar { background: #111812; color: #DDFBE0; border-bottom: 1px solid #354837; box-shadow: none; }
+headerbar label, headerbar .title, headerbar .subtitle { color: #DDFBE0; }
+headerbar button, windowcontrols button { background: #1A2B1D; color: #DDFBE0; }
+headerbar button:hover, windowcontrols button:hover { background: #304B35; color: #FFFFFF; }
+headerbar:backdrop, headerbar:backdrop label { background: #111812; color: #A7B7AA; }
 window { background: #0B0F0C; color: #DDFBE0; }
 .header { background: #0B0F0C; border-bottom: 1px solid #263A2B; padding: 12px 18px; }
 .title { color: #DDFBE0; font-size: 22px; font-weight: 700; }
@@ -319,6 +326,11 @@ def resource_text(name: str, used_mb: int, total_mb: int) -> str:
 class ShappWindow(Gtk.ApplicationWindow):
     def __init__(self, app: Gtk.Application) -> None:
         super().__init__(application=app, title="SHAPP - SHAI App Manager")
+        titlebar = Gtk.HeaderBar()
+        titlebar.add_css_class("titlebar")
+        titlebar.set_title_widget(Gtk.Label(label="SHAPP - SHAI App Manager"))
+        titlebar.set_show_title_buttons(True)
+        self.set_titlebar(titlebar)
         self.set_default_size(1180, 760)
         self.set_size_request(900, 620)
         self.catalog = json.loads(CATALOG.read_text(encoding="utf-8"))["apps"]
@@ -328,16 +340,21 @@ class ShappWindow(Gtk.ApplicationWindow):
         self.apt_installed = installed_apt_packages()
         self.snap_installed = installed_snaps()
         self.container_installed = installed_containers()
+        self.managed_installed = {path.stem for path in (Path('/var/lib/shai/apps') / os.environ.get('USER', '')).glob('*.json')}
         self.installed_apps = discover_apps(self.patterns, self.catalog)
         for item in self.catalog:
             service = item.get("container_service")
             if service in self.container_installed:
+                display_name = str(item['name']) + (' (runtime staged; not activated)' if service == 'matter-server' else '')
                 self.installed_apps.append(InstalledApp(
-                    "container", str(service), str(item["name"]),
+                    "container", str(service), display_name,
                     str(item["description"]), int(item["disk_mb"]),
                     int(item["ram_mb"]), False,
                 ))
         self.installed_apps.sort(key=lambda app: app.name.casefold())
+        for item in self.catalog:
+            if item['id'] in self.managed_installed:
+                self.installed_apps.append(InstalledApp('managed', item['id'], item['name'], item['description'], int(item['disk_mb']), int(item['ram_mb']), False))
         log_discovered_apps(self.installed_apps, "SHAPP opened")
         self.baseline: dict[str, bool] = {}
         self.desired: dict[str, bool] = {}
@@ -348,11 +365,16 @@ class ShappWindow(Gtk.ApplicationWindow):
         self.installed_checks: list[tuple[Gtk.CheckButton, str]] = []
         self.refreshing = False
         self.plan_id = ""
+        self.applying = False
+        self.completion_path: Path | None = None
         self.active_tab = "recommended"
 
         for package in self.apt_installed:
             self.baseline[f"apt:{package}"] = True
             self.desired[f"apt:{package}"] = True
+        for app_id in self.managed_installed:
+            self.baseline[f'managed:{app_id}'] = True
+            self.desired[f'managed:{app_id}'] = True
         for package in self.snap_installed:
             self.baseline[f"snap:{package}"] = True
             self.desired[f"snap:{package}"] = True
@@ -492,7 +514,7 @@ class ShappWindow(Gtk.ApplicationWindow):
         page.append(self.managed_architecture)
         page.append(text_label(
             "Docker is not installed or changed by this selector. Container-backed entries remain "
-            "disabled until the managed-stack backend is completed.",
+            "available only for services with reviewed container recipes. Network and radio setup may still be required.",
             "muted",
         ))
         self.architecture_state = text_label("", "online")
@@ -575,22 +597,72 @@ class ShappWindow(Gtk.ApplicationWindow):
             if self.architecture_mode == "managed-stack" and item.get("container_service"):
                 return "Advanced Docker service · persistent data · private SHAI bridge"
             return str(item.get("status", "Available"))
+        if item.get('host_backend') == 'veracrypt' and platform.machine().lower() not in {'x86_64', 'amd64'}:
+            return 'Reviewed VeraCrypt installer requires amd64 Ubuntu'
+        if self.architecture_mode == 'managed-stack' and item.get('container_service'):
+            if platform.machine().lower() not in {'x86_64', 'amd64', 'aarch64', 'arm64'}:
+                return 'Docker backend requires amd64 or arm64 hardware'
+            if (os.cpu_count() or 0) < 2:
+                return 'Docker backend requires at least 2 logical CPUs'
         mode = "Direct Ubuntu" if self.architecture_mode == "direct-host" else "Managed Docker"
+        if self.architecture_mode == 'direct-host' and item.get('container_service'):
+            return f"Requires Advanced Docker architecture | {item.get('status', '')}"
         return f"{mode} installer pending · {item.get('status', 'backend unavailable')}"
 
     def item_keys(self, item: dict[str, object]) -> list[str]:
         service = item.get("container_service")
         if self.architecture_mode == "managed-stack" and service:
             return [f"container:{service}"]
+        if item.get('host_backend'):
+            return [f"managed:{item['id']}"]
         return [f"apt:{package}" for package in item["packages"]]
 
     def backend_available(self, item: dict[str, object]) -> bool:
+        if item.get('host_backend') and not (self.architecture_mode == 'managed-stack' and item.get('container_service')):
+            if item.get('host_backend') == 'veracrypt':
+                return platform.machine().lower() in {'x86_64', 'amd64'}
+            return True
         if self.architecture_mode == "managed-stack" and item.get("container_service"):
-            if item.get("container_service") == "zigbee2mqtt":
+            if platform.machine().lower() not in {'x86_64', 'amd64', 'aarch64', 'arm64'} or (os.cpu_count() or 0) < 2:
+                return False
+            if item.get("container_service") in {"zigbee2mqtt", 'zwavejs'}:
                 directory = Path("/dev/serial/by-id")
                 return directory.is_dir() and len(list(directory.glob("*"))) == 1
             return True
         return bool(item.get("available", True)) and bool(item["packages"])
+
+    def stack_capacity_restrictions(self, ram_total: int, extra: dict[str, object] | None = None) -> list[str]:
+        if self.architecture_mode != 'managed-stack':
+            return []
+        selected = set()
+        installing = False
+        for item in self.catalog:
+            service = item.get('container_service')
+            key = f'container:{service}'
+            if service and self.desired.get(key, self.baseline.get(key, False)):
+                selected.add(str(service))
+                installing |= not self.baseline.get(key, False)
+        if extra and extra.get('container_service'):
+            service = str(extra['container_service'])
+            selected.add(service)
+            installing |= not self.baseline.get(f'container:{service}', False)
+        if not installing:
+            return []
+        if 'zigbee2mqtt' in selected:
+            selected.add('mosquitto')
+        try:
+            catalog = json.loads(STACK_CATALOG.read_text(encoding='utf-8'))['services']
+            required_ram = 2048 + sum(int(catalog[key]['minimum_ram_mb']) for key in selected)
+            required_disk = 10240 + sum(int(catalog[key]['minimum_disk_mb']) for key in selected)
+            free_disk = shutil.disk_usage('/var/lib').free // (1024 * 1024)
+        except (OSError, ValueError, KeyError, TypeError):
+            return ['Docker capacity assessment unavailable']
+        failures = []
+        if ram_total < required_ram:
+            failures.append(f'Docker workload plus Ubuntu reserve needs {required_ram} MB RAM')
+        if free_disk < required_disk:
+            failures.append(f'Docker workload plus safety reserve needs {required_disk} MB free on /var/lib')
+        return failures
 
     def build_catalog_view(self, category: str) -> Gtk.Widget:
         content = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
@@ -826,7 +898,8 @@ class ShappWindow(Gtk.ApplicationWindow):
         counted_ram: set[str] = set()
         removal_ram: dict[str, int] = {}
         for app in removals:
-            disk -= app.disk_mb
+            if app.source != 'container':
+                disk -= app.disk_mb
             item = catalog_by_package.get(f"{app.source}:{app.package}")
             amount = app.ram_mb
             if item:
@@ -848,7 +921,8 @@ class ShappWindow(Gtk.ApplicationWindow):
         disk_used, disk_total, ram_used, ram_total = capacity
         final_disk = max(0, disk_used + disk_change)
         final_ram = max(0, ram_used + ram_change)
-        capacity_ok = final_disk <= disk_total and final_ram <= ram_total
+        stack_failures = self.stack_capacity_restrictions(ram_total)
+        capacity_ok = final_disk <= disk_total and final_ram <= ram_total and not stack_failures
 
         self.header_disk.set_text(resource_text("Disk", disk_used, disk_total))
         self.header_ram.set_text(resource_text("RAM", ram_used, ram_total))
@@ -859,8 +933,8 @@ class ShappWindow(Gtk.ApplicationWindow):
             f"RAM {ram_change:+d} MB -> est. {final_ram / 1024:.1f}/{ram_total / 1024:.1f} GB"
         )
         for label, exceeded in (
-            (self.disk_total, final_disk > disk_total),
-            (self.ram_total, final_ram > ram_total),
+            (self.disk_total, final_disk > disk_total or any('disk' in failure or '/var/lib' in failure for failure in stack_failures)),
+            (self.ram_total, final_ram > ram_total or any('RAM' in failure for failure in stack_failures)),
         ):
             label.remove_css_class("danger")
             if exceeded:
@@ -883,7 +957,7 @@ class ShappWindow(Gtk.ApplicationWindow):
             selected = all(self.desired.get(key, False) for key in packages)
             projected_disk = final_disk + (0 if selected else int(item["disk_mb"]))
             projected_ram = final_ram + (0 if selected else int(item["ram_mb"]))
-            restrictions = []
+            restrictions = self.stack_capacity_restrictions(ram_total, item)
             if projected_disk > disk_total:
                 available_disk = max(0, disk_total - final_disk)
                 restrictions.append(
@@ -924,8 +998,9 @@ class ShappWindow(Gtk.ApplicationWindow):
             ))
         for app in removals:
             ram_removed = removal_ram[f"{app.source}:{app.package}"]
+            disk_detail = 'data/images preserved' if app.source == 'container' else f'-{app.disk_mb} MB disk'
             self.cart_items.append(self.pending_row(
-                f"UNINSTALL  {app.name}\n-{app.disk_mb} MB disk · "
+                f"UNINSTALL  {app.name}\n{disk_detail} · "
                 f"-{ram_removed} MB RAM",
                 "remove",
                 self.remove_uninstall_from_cart,
@@ -942,7 +1017,7 @@ class ShappWindow(Gtk.ApplicationWindow):
             self.cart_title.set_tooltip_text("Capacity exceeded; remove a selection")
         else:
             self.cart_title.set_tooltip_text(None)
-        self.apply_button.set_sensitive(count > 0 and capacity_ok)
+        self.apply_button.set_sensitive(count > 0 and capacity_ok and not self.applying)
 
     def open_ubuntu_store(self, _button: Gtk.Button) -> None:
         manage = shutil.which("snap-store.show-updates")
@@ -959,9 +1034,13 @@ class ShappWindow(Gtk.ApplicationWindow):
         self.show_status("Ubuntu App Store is not installed. No changes were made.")
 
     def terminal_command(self, plan: Path) -> list[str] | None:
+        completion = shlex.quote(str(plan.with_suffix('.exit')))
+        exit_trap = f'rc=$?; trap - EXIT; printf "%s\\n" "$rc" > {completion}'
         script = (
+            f"trap {shlex.quote(exit_trap)} EXIT; "
+            "trap 'exit 129' HUP; trap 'exit 130' INT; trap 'exit 143' TERM; "
             f"sudo /usr/bin/shai-shapp-apply {shlex.quote(str(plan))}; "
-            "rc=$?; echo; "
+            f"rc=$?; printf '%s\\n' \"$rc\" > {completion}; trap - EXIT; echo; "
             "if [ $rc -eq 0 ]; then echo 'SHAPP completed successfully.'; "
             "else echo \"SHAPP stopped with exit code $rc.\"; fi; "
             "echo 'This window will remain open for review. Press Enter to close.'; read; exit $rc"
@@ -974,10 +1053,18 @@ class ShappWindow(Gtk.ApplicationWindow):
         return [terminal, "-e", "bash", "-lc", script] if terminal else None
 
     def apply_changes(self, _button: Gtk.Button) -> None:
+        if self.applying:
+            return
         installs, removals = self.changes()
+        if not installs and not removals:
+            return
+        disk, ram, _ = self.change_totals(installs, removals)
+        if not self.update_capacity_controls(disk, ram, system_capacity_mb()):
+            self.show_status("Capacity exceeded; remove a selection before applying.")
+            return
         plan_id = str(uuid.uuid4())
         plan_data = {
-            "schema": 3,
+            "schema": 4,
             "plan_id": plan_id,
             "target_user": os.environ.get("USER", ""),
             "architecture": self.architecture_mode,
@@ -985,6 +1072,7 @@ class ShappWindow(Gtk.ApplicationWindow):
             "remove_apt": sorted({app.package for app in removals if app.source == "apt"}),
             "remove_snap": sorted({app.package for app in removals if app.source == "snap"}),
             "remove_container": sorted({app.package for app in removals if app.source == "container"}),
+            "remove_managed": sorted({app.package for app in removals if app.source == "managed"}),
         }
         cache = Path.home() / ".cache/shai"
         cache.mkdir(parents=True, exist_ok=True, mode=0o700)
@@ -999,19 +1087,35 @@ class ShappWindow(Gtk.ApplicationWindow):
         if command_line is None:
             self.show_status("No supported terminal is available. No changes were made.")
             return
+        try:
+            subprocess.Popen(command_line, start_new_session=True)
+        except OSError as exc:
+            self.show_status(f"Could not open the terminal: {exc}")
+            return
         self.plan_id = plan_id
+        self.completion_path = plan.with_suffix('.exit')
+        self.applying = True
         self.apply_button.set_sensitive(False)
         self.show_status("Visible terminal opened. Enter sudo authentication there.")
-        subprocess.Popen(command_line, start_new_session=True)
         GLib.timeout_add_seconds(1, self.poll_result)
 
     def poll_result(self) -> bool:
         try:
             result = json.loads(RESULT.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError):
-            return True
+            result = {}
         if result.get("plan_id") != self.plan_id:
+            if self.completion_path is not None:
+                try:
+                    code = int(self.completion_path.read_text(encoding='utf-8').strip())
+                except (OSError, ValueError):
+                    return True
+                self.applying = False
+                self.show_status(f'Terminal operation ended (exit {code}) without a completion record. Review the terminal; you can retry. A running backend blocks duplicate applies.')
+                self.refresh_cart()
+                return False
             return True
+        self.applying = False
         message = str(result.get("message", "Package operation finished."))
         log_file = str(result.get("log_file", daily_log_path()))
         self.show_status(f"{message}\nDaily log: {log_file}")
@@ -1019,16 +1123,22 @@ class ShappWindow(Gtk.ApplicationWindow):
             self.apt_installed = installed_apt_packages()
             self.snap_installed = installed_snaps()
             self.container_installed = installed_containers()
+            self.managed_installed = {path.stem for path in (Path('/var/lib/shai/apps') / os.environ.get('USER', '')).glob('*.json')}
             self.baseline = {f"apt:{package}": True for package in self.apt_installed}
             self.baseline.update({f"snap:{package}": True for package in self.snap_installed})
             self.baseline.update({f"container:{service}": True for service in self.container_installed})
+            self.baseline.update({f"managed:{app_id}": True for app_id in self.managed_installed})
             self.desired = dict(self.baseline)
             self.installed_apps = discover_apps(self.patterns, self.catalog)
             for item in self.catalog:
+                if item['id'] in self.managed_installed:
+                    self.installed_apps.append(InstalledApp('managed', item['id'], item['name'], item['description'], int(item['disk_mb']), int(item['ram_mb']), False))
+            for item in self.catalog:
                 service = item.get("container_service")
                 if service in self.container_installed:
+                    display_name = str(item['name']) + (' (runtime staged; not activated)' if service == 'matter-server' else '')
                     self.installed_apps.append(InstalledApp(
-                        "container", str(service), str(item["name"]),
+                        "container", str(service), display_name,
                         str(item["description"]), int(item["disk_mb"]),
                         int(item["ram_mb"]), False,
                     ))
@@ -1039,7 +1149,7 @@ class ShappWindow(Gtk.ApplicationWindow):
             self.refresh_cart()
         else:
             append_log("FAILED", "shapp", self.plan_id, message)
-            self.apply_button.set_sensitive(True)
+            self.refresh_cart()
         return False
 
 

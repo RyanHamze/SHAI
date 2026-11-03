@@ -1,6 +1,6 @@
 [Desktop Entry]
 Type=Application
-Name=AIA - Local AI Assistant
+Name=AIA AI Assistant
 Comment=Manage hardware-aware offline AI models and local assistance
 Exec=shai-aia
 Icon=shai-ai-advisor

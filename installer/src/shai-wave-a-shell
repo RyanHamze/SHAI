@@ -27,6 +27,11 @@ SUMMARY = Path(
     os.environ.get("SHAI_SYSTEM_SUMMARY", "/var/lib/shai-installer/system-summary.txt")
 )
 CSS = b"""
+headerbar, headerbar.titlebar { background: #111812; color: #DDFBE0; border-bottom: 1px solid #354837; box-shadow: none; }
+headerbar label, headerbar .title, headerbar .subtitle { color: #DDFBE0; }
+headerbar button, windowcontrols button { background: #1A2B1D; color: #DDFBE0; }
+headerbar button:hover, windowcontrols button:hover { background: #304B35; color: #FFFFFF; }
+headerbar:backdrop, headerbar:backdrop label { background: #111812; color: #A7B7AA; }
 window { background: #0B0F0C; color: #DDFBE0; }
 .header { background: #111812; border-bottom: 1px solid #263A2B; padding: 14px 20px; }
 .content { padding: 24px; }
@@ -67,6 +72,11 @@ class ShellWindow(Gtk.ApplicationWindow):
     def __init__(self, app: Gtk.Application, mode: str) -> None:
         title = self.TITLES.get(mode, "SHAI")
         super().__init__(application=app, title=title)
+        titlebar = Gtk.HeaderBar()
+        titlebar.add_css_class("titlebar")
+        titlebar.set_title_widget(Gtk.Label(label=title))
+        titlebar.set_show_title_buttons(True)
+        self.set_titlebar(titlebar)
         self.mode = mode
         self.state = read_state()
         self.set_default_size(900, 600)

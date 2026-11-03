@@ -3,7 +3,7 @@ set -Eeuo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 readonly ROOT
-readonly VERSION="0.8.3"
+readonly VERSION="0.12.0"
 readonly PACKAGE="shai-installer_${VERSION}_amd64"
 BUILD_ROOT="$(mktemp -d "/tmp/shai-installer-build-${VERSION}.XXXXXX")"
 readonly BUILD_ROOT
@@ -23,6 +23,7 @@ install -d \
     "$STAGE/usr/bin" \
     "$STAGE/usr/lib/shai-installer/catalog" \
     "$STAGE/usr/lib/shai-installer/assets" \
+    "$STAGE/usr/lib/shai-installer/assets/openwebui" \
     "$STAGE/usr/lib/shai-installer/assets/launchers" \
     "$STAGE/usr/lib/systemd/system" \
     "$STAGE/usr/lib/systemd/user" \
@@ -34,6 +35,7 @@ install -d \
     "$STAGE/usr/share/themes/SHAI/gtk-4.0" \
     "$STAGE/usr/share/backgrounds/shai" \
     "$STAGE/usr/share/shai/branding" \
+    "$STAGE/usr/share/shai/integrations/exiftool" \
     "$DIST"
 
 install -m 0644 "$ROOT/installer/debian/control" "$STAGE/DEBIAN/control"
@@ -42,11 +44,24 @@ install -m 0755 "$ROOT/installer/src/shai-setup" "$STAGE/usr/bin/shai-setup"
 install -m 0755 "$ROOT/installer/src/shai-shapp" "$STAGE/usr/bin/shai-shapp"
 install -m 0755 "$ROOT/installer/src/shai-shapp-apply" "$STAGE/usr/bin/shai-shapp-apply"
 install -m 0755 "$ROOT/installer/src/shai-stack-apply" "$STAGE/usr/lib/shai-installer/shai-stack-apply"
+install -m 0755 "$ROOT/installer/src/shai-app-install" "$STAGE/usr/lib/shai-installer/shai-app-install"
+install -m 0755 "$ROOT/installer/src/shai-source-install" "$STAGE/usr/lib/shai-installer/shai-source-install"
 install -m 0755 "$ROOT/installer/src/shai-network-snapshot" "$STAGE/usr/lib/shai-installer/shai-network-snapshot"
 install -m 0755 "$ROOT/installer/src/shai-shapp-log" "$STAGE/usr/lib/shai-installer/shai-shapp-log"
 install -m 0755 "$ROOT/installer/src/shai-health" "$STAGE/usr/bin/shai-health"
 install -m 0755 "$ROOT/installer/src/shai-aia" "$STAGE/usr/bin/shai-aia"
 install -m 0755 "$ROOT/installer/src/shai-aia-server" "$STAGE/usr/bin/shai-aia-server"
+install -m 0755 "$ROOT/installer/src/shai-metadata" "$STAGE/usr/bin/shai-metadata"
+install -m 0644 "$ROOT/installer/assets/exiftool/README.md" "$STAGE/usr/share/shai/integrations/exiftool/README.md"
+install -m 0644 "$ROOT/installer/assets/exiftool/commands.json" "$STAGE/usr/share/shai/integrations/exiftool/commands.json"
+install -m 0644 "$ROOT/installer/share/applications/shai-metadata.desktop" "$STAGE/usr/share/applications/com.aabey.shai.Metadata.desktop"
+install -m 0755 "$ROOT/installer/src/shai-voice-manage" "$STAGE/usr/lib/shai-installer/shai-voice-manage"
+install -m 0644 "$ROOT/installer/share/applications/shai-aia.desktop" "$STAGE/usr/share/applications/com.aabey.shai.AIA.desktop"
+install -m 0755 "$ROOT/installer/src/shai-control" "$STAGE/usr/bin/shai-control"
+install -m 0755 "$ROOT/installer/src/shai-control-broker" "$STAGE/usr/lib/shai-installer/shai-control-broker"
+install -m 0755 "$ROOT/installer/src/shai-control-approve" "$STAGE/usr/lib/shai-installer/shai-control-approve"
+install -m 0755 "$ROOT/installer/src/shai-secret-migrate" "$STAGE/usr/lib/shai-installer/shai-secret-migrate"
+install -m 0755 "$ROOT/installer/src/shai-secret-store" "$STAGE/usr/lib/shai-installer/shai-secret-store"
 install -m 0755 "$ROOT/installer/src/shai-wave-a-shell" "$STAGE/usr/bin/shai-wave-a-shell"
 install -m 0755 "$ROOT/installer/src/shai-theme-apply" "$STAGE/usr/bin/shai-theme-apply"
 install -m 0755 "$ROOT/installer/src/shai-theme-reset" "$STAGE/usr/bin/shai-theme-reset"
@@ -64,6 +79,7 @@ install -m 0644 "$ROOT/installer/catalog/shai-stack-services.json" "$STAGE/usr/l
 install -m 0644 "$ROOT/installer/systemd/shai-network-snapshot.service" "$STAGE/usr/lib/systemd/system/shai-network-snapshot.service"
 install -m 0644 "$ROOT/installer/systemd/shai-network-snapshot.timer" "$STAGE/usr/lib/systemd/system/shai-network-snapshot.timer"
 install -m 0644 "$ROOT/installer/systemd/shai-aia-model.service" "$STAGE/usr/lib/systemd/user/shai-aia-model.service"
+install -m 0644 "$ROOT/installer/systemd/shai-control-broker.service" "$STAGE/usr/lib/systemd/system/shai-control-broker.service"
 
 for file in \
     01-applications.list \
@@ -88,11 +104,16 @@ install -m 0644 "$ROOT/connectivity/etc/firefox/policies/policies.json" "$STAGE/
 install -m 0644 "$ROOT/installer/assets/30-shai-privacy" "$STAGE/usr/lib/shai-installer/assets/30-shai-privacy"
 install -m 0644 "$ROOT/installer/assets/gnome-wellbeing-panel.desktop" "$STAGE/usr/lib/shai-installer/assets/gnome-wellbeing-panel.desktop"
 install -m 0644 "$ROOT/installer/assets/shai.palette" "$STAGE/usr/lib/shai-installer/assets/shai.palette"
+install -m 0644 "$ROOT/installer/assets/openwebui/shai-openapi-connection.md" "$STAGE/usr/lib/shai-installer/assets/openwebui/shai-openapi-connection.md"
 install -m 0644 "$ROOT/installer/README.md" "$STAGE/usr/share/doc/shai-installer/README.md"
 install -m 0644 "$ROOT/installer/SETUP_README.md" "$STAGE/usr/share/doc/shai-installer/SETUP_README.md"
 install -m 0644 "$ROOT/docs/THIRD_PARTY_NOTICES.md" "$STAGE/usr/share/doc/shai-installer/THIRD_PARTY_NOTICES.md"
+install -m 0644 "$ROOT/docs/AIA_CONTROL_BROKER.md" "$STAGE/usr/share/doc/shai-installer/AIA_CONTROL_BROKER.md"
+install -m 0644 "$ROOT/docs/SHAPP_INSTALL_BACKENDS.md" "$STAGE/usr/share/doc/shai-installer/SHAPP_INSTALL_BACKENDS.md"
+install -m 0644 "$ROOT/docs/RELEASE_0_12_0_AUDIT.md" "$STAGE/usr/share/doc/shai-installer/RELEASE_0_12_0_AUDIT.md"
 install -m 0644 "$ROOT/installer/share/applications/shai-setup.desktop" "$STAGE/usr/share/applications/shai-setup.desktop"
-for launcher in shai-home.desktop shai-shapp.desktop shai-health.desktop shai-aia.desktop shai-appearance.desktop; do
+install -m 0644 "$ROOT/installer/share/applications/shai-control.desktop" "$STAGE/usr/share/applications/shai-control.desktop"
+for launcher in shai-home.desktop shai-shapp.desktop shai-health.desktop shai-aia.desktop shai-appearance.desktop shai-control.desktop; do
     install -m 0644 "$ROOT/installer/share/applications/$launcher" "$STAGE/usr/lib/shai-installer/assets/launchers/$launcher"
 done
 install -m 0644 "$ROOT/branding/SHAI_Brand_v2/shai-lockup-dark.svg" "$STAGE/usr/share/shai/branding/shai-lockup-dark.svg"

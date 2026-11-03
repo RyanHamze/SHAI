@@ -1,0 +1,156 @@
+#!/usr/bin/env python3
+"""Local ExifTool GUI; metadata writes require approval and retain originals."""
+import datetime
+import json
+from pathlib import Path
+import shlex
+import shutil
+import subprocess
+import threading
+
+import gi
+gi.require_version("Gtk", "4.0")
+gi.require_version("Gdk", "4.0")
+from gi.repository import Gtk, Gdk, GLib
+
+CSS = b"""
+window { background:#0B0F0C; color:#DDFBE0; }
+headerbar { background:#111812; color:#DDFBE0; }
+headerbar label, headerbar button { color:#DDFBE0; }
+button { background:#1A2B1D; color:#DDFBE0; padding:8px; }
+textview, textview text { background:#111812; color:#DDFBE0; }
+"""
+
+def command(path, recursive=True, remove=False):
+    target = Path(path).absolute()
+    if target.is_symlink() or not target.exists():
+        raise ValueError("Select an existing regular file or directory, not a symbolic link.")
+    if not target.is_file() and not target.is_dir():
+        raise ValueError("Only regular files and directories are supported.")
+    if target.is_dir() and target == Path(target.anchor):
+        raise ValueError("Refusing a whole-filesystem operation. Choose a specific folder.")
+    # Default ExifTool writes create _original backups; do not override this.
+    return ["exiftool", *(["-all="] if remove else ["-json", "-G1"]),
+            *(["-r"] if recursive and target.is_dir() else []), "--", str(target)]
+
+class Window(Gtk.ApplicationWindow):
+    def __init__(self, app):
+        super().__init__(application=app, title="SHAI Metadata Cleaner")
+        self.set_default_size(850, 650)
+        self.set_icon_name("shai-ai-advisor")
+        bar = Gtk.HeaderBar()
+        bar.set_title_widget(Gtk.Label(label="SHAI Metadata Cleaner"))
+        self.set_titlebar(bar)
+        self.target = None
+        self.busy = False
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12)
+        for side in ("top", "bottom", "start", "end"):
+            getattr(box, "set_margin_" + side)(16)
+        self.set_child(box)
+        row = Gtk.Box(spacing=8)
+        for title, folder in (("Choose file", False), ("Choose folder of files", True)):
+            button = Gtk.Button(label=title)
+            button.connect("clicked", lambda _b, directory=folder: self.choose(directory))
+            row.append(button)
+        self.recursive = Gtk.CheckButton(label="Include files in all subfolders")
+        self.recursive.set_active(True)
+        row.append(self.recursive)
+        box.append(row)
+        self.selection = Gtk.Label(label="No file or folder selected", xalign=0, wrap=True, selectable=True)
+        box.append(self.selection)
+        row = Gtk.Box(spacing=8)
+        self.controls = []
+        for title, remove in (("Inspect metadata", False), ("Remove metadata", True)):
+            button = Gtk.Button(label=title)
+            button.connect("clicked", lambda _b, write=remove: self.prepare(write))
+            row.append(button)
+            self.controls.append(button)
+        box.append(row)
+        self.output = Gtk.TextView(editable=False, monospace=True, wrap_mode=Gtk.WrapMode.WORD_CHAR)
+        scroll = Gtk.ScrolledWindow(hexpand=True, vexpand=True)
+        scroll.set_child(self.output)
+        box.append(scroll)
+        self.show("ExifTool operates locally. Removal retains _original backups, which still contain the original metadata. Some formats cannot be completely scrubbed; this is not a guarantee of anonymity.")
+
+    def show(self, text):
+        self.output.get_buffer().set_text(text)
+
+    def choose(self, folder):
+        if self.busy:
+            return
+        chooser = Gtk.FileChooserNative.new("Select target", self,
+                    Gtk.FileChooserAction.SELECT_FOLDER if folder else Gtk.FileChooserAction.OPEN, "Select", "Cancel")
+        def selected(dialog, response):
+            if response == Gtk.ResponseType.ACCEPT and dialog.get_file():
+                self.target = dialog.get_file().get_path()
+                self.selection.set_text(("Files inside: " if folder else "File: ") + self.target)
+            dialog.destroy()
+        chooser.connect("response", selected)
+        chooser.show()
+
+    def prepare(self, remove):
+        if self.busy:
+            return
+        if not shutil.which("exiftool"):
+            self.show("ExifTool is not installed. Select ExifTool in SHAPP and apply the installation.")
+            return
+        try:
+            args = command(self.target or "", self.recursive.get_active(), remove)
+            if not self.target:
+                raise ValueError("Choose a file or folder first.")
+        except ValueError as exc:
+            self.show(str(exc)); return
+        scope = ("Supported files inside the selected folder and every subfolder" if "-r" in args else
+                 "Supported files directly inside the selected folder") if Path(self.target).is_dir() else "The selected file"
+        self.show("Target: " + scope + ". Folder metadata is not a target.\nCommand preview:\n" + shlex.join(args))
+        if not remove:
+            self.execute(args); return
+        dialog = Gtk.MessageDialog(transient_for=self, modal=True, buttons=Gtk.ButtonsType.OK_CANCEL,
+                    text="Remove metadata from these files?", secondary_text=scope + "\n\n" + shlex.join(args) +
+                    "\n\nThis modifies supported files and retains _original backups. Backups contain the metadata you are removing. Do not share those backups.")
+        def confirmed(window, response):
+            window.destroy()
+            if response == Gtk.ResponseType.OK:
+                self.execute(args)
+        dialog.connect("response", confirmed)
+        dialog.present()
+
+    def execute(self, args):
+        self.busy = True
+        for button in self.controls:
+            button.set_sensitive(False)
+        def worker():
+            try:
+                result = subprocess.run(args, text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=600)
+                text = shlex.join(args) + f"\n\nExit status: {result.returncode}\n" + result.stdout
+            except (OSError, subprocess.TimeoutExpired) as exc:
+                text = f"ExifTool failed: {exc}. A timed-out bulk write may have partially completed; inspect targets and backups."
+            logs = Path.home() / ".local/state/shai/metadata/logs"
+            try:
+                logs.mkdir(parents=True, exist_ok=True, mode=0o700)
+                path = logs / (datetime.date.today().isoformat() + ".log")
+                with path.open("a") as stream:
+                    stream.write(datetime.datetime.now().astimezone().isoformat() + " " + shlex.join(args) + "\n")
+                path.chmod(0o600)
+            except OSError:
+                pass
+            def finished():
+                self.show(text)
+                self.busy = False
+                for button in self.controls:
+                    button.set_sensitive(True)
+                return False
+            GLib.idle_add(finished)
+        threading.Thread(target=worker, daemon=True).start()
+
+class App(Gtk.Application):
+    def __init__(self):
+        super().__init__(application_id="com.aabey.shai.Metadata")
+    def do_activate(self):
+        provider = Gtk.CssProvider()
+        provider.load_from_data(CSS)
+        Gtk.StyleContext.add_provider_for_display(Gdk.Display.get_default(), provider, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION)
+        (self.props.active_window or Window(self)).present()
+
+if __name__ == "__main__":
+    App().run()

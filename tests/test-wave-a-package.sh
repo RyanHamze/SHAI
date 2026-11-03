@@ -3,7 +3,7 @@ set -Eeuo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 readonly ROOT
-readonly PACKAGE="${1:-$ROOT/dist/shai-installer_0.8.3_amd64.deb}"
+readonly PACKAGE="${1:-$ROOT/dist/shai-installer_0.12.0_amd64.deb}"
 TEST_DIR="$(mktemp -d /tmp/shai-wave-a-package-test.XXXXXX)"
 readonly TEST_DIR
 USER_NAME="$(id -un)"
@@ -28,6 +28,11 @@ python3 -m py_compile \
     "$ROOT/installer/src/shai-health" \
     "$ROOT/installer/src/shai-aia" \
     "$ROOT/installer/src/shai-aia-server" \
+    "$ROOT/installer/src/shai-control-broker" \
+    "$ROOT/installer/src/shai-control" \
+    "$ROOT/installer/src/shai-control-approve" \
+    "$ROOT/installer/src/shai-secret-migrate" \
+    "$ROOT/installer/src/shai-secret-store" \
     "$ROOT/installer/src/shai-wave-a-shell" \
     "$ROOT/installer/src/shai-appearance" \
     "$ROOT/installer/src/shai-plan-validator" \
@@ -41,12 +46,12 @@ data = json.loads(pathlib.Path(sys.argv[1]).read_text(encoding="utf-8"))
 apps = data["apps"]
 ids = {item["id"] for item in apps}
 assert data["schema"] == 2
-assert len(apps) == 30
+assert len(apps) == 35
 assert sum(item["category"] == "recommended" for item in apps) == 11
-assert sum(item["category"] == "optional" for item in apps) == 19
+assert sum(item["category"] == "optional" for item in apps) == 24
 assert len(ids) == len(apps)
 assert {"sniffnet", "home-assistant", "mosquitto", "zigbee2mqtt", "whisper", "jellyfin",
-        "keepassxc", "opensnitch", "suricata"} <= ids
+        "keepassxc", "opensnitch", "suricata", "open-webui"} <= ids
 assert all(item["packages"] for item in apps if item["available"])
 assert all(not item["packages"] for item in apps if not item["available"])
 PY
@@ -68,6 +73,11 @@ assert "read_only: true" in observer_block
 assert "/var/run/docker.sock:/var/run/docker.sock:ro" in observer_block
 assert "networks: [shai-observer]" in observer_block
 assert "internal: true" in compose
+webui = module.compose_text({"open-webui"}, catalog["services"], None, observer)
+assert "network_mode: host" in webui
+assert "HOST: 127.0.0.1" in webui
+assert "OPENAI_API_BASE_URL: http://127.0.0.1:11435/v1" in webui
+assert "OPENAI_API_KEY: ${AIA_API_KEY}" in webui
 PY
 
 python3 - "$ROOT/installer/src/shai-installer" <<'PY'
@@ -194,6 +204,12 @@ for path in \
     usr/bin/shai-health \
     usr/bin/shai-aia \
     usr/bin/shai-aia-server \
+    usr/bin/shai-control \
+    usr/lib/shai-installer/shai-control-broker \
+    usr/lib/shai-installer/shai-control-approve \
+    usr/lib/shai-installer/shai-secret-migrate \
+    usr/lib/shai-installer/shai-secret-store \
+    usr/lib/systemd/system/shai-control-broker.service \
     usr/lib/systemd/user/shai-aia-model.service \
     usr/bin/shai-wave-a-shell \
     usr/bin/shai-theme-apply \
@@ -207,6 +223,7 @@ for path in \
     usr/lib/shai-installer/assets/30-shai-privacy \
     usr/lib/shai-installer/assets/gnome-wellbeing-panel.desktop \
     usr/lib/shai-installer/assets/shai.palette \
+    usr/lib/shai-installer/assets/openwebui/shai-openapi-connection.md \
     usr/share/applications/shai-setup.desktop \
     usr/share/doc/shai-installer/SETUP_README.md \
     usr/share/doc/shai-installer/THIRD_PARTY_NOTICES.md \
@@ -322,9 +339,26 @@ grep -Fq 'Exec=shai-aia' \
 grep -Fq 'StartupWMClass=com.aabey.shai.AIA' \
     "$TEST_DIR/root/usr/lib/shai-installer/assets/launchers/shai-aia.desktop"
 grep -Fq 'Clear local chat' "$TEST_DIR/root/usr/bin/shai-aia"
-grep -Fq 'Reset active model' "$TEST_DIR/root/usr/bin/shai-aia"
+grep -Fq 'Unload active model' "$TEST_DIR/root/usr/bin/shai-aia"
+grep -Fq 'last_model_error' "$TEST_DIR/root/usr/bin/shai-aia"
+grep -Fq 'Facts: selected local model is' "$TEST_DIR/root/usr/bin/shai-aia"
+grep -Fq 'sha256sum --check --status' "$TEST_DIR/root/usr/bin/shai-aia"
+grep -Fq 'systemctl --user restart {SERVER_SERVICE}' "$TEST_DIR/root/usr/bin/shai-aia"
+grep -Fq 'Optional browser interface' "$TEST_DIR/root/usr/bin/shai-aia"
+grep -Fq 'Qwen 2.5 0.5B Instruct' "$TEST_DIR/root/usr/bin/shai-aia"
 grep -Fq '/v1/chat/completions' "$TEST_DIR/root/usr/bin/shai-aia"
-grep -Fq 'Persistent local model ready' "$TEST_DIR/root/usr/bin/shai-aia"
+grep -Fq 'Service active (PID' "$TEST_DIR/root/usr/bin/shai-aia"
+grep -Fq 'proposal-only' "$TEST_DIR/root/usr/lib/shai-installer/shai-control-broker"
+grep -Fq 'SAFE_ACTIONS' "$TEST_DIR/root/usr/lib/shai-installer/shai-control-broker"
+grep -Fq 'vault://' "$TEST_DIR/root/usr/bin/shai-aia"
+grep -Fq 'shai-secret-store' "$TEST_DIR/root/usr/bin/shai-aia"
+grep -Fq 'SHAI_CONTROL_TOKEN' "$TEST_DIR/root/usr/lib/shai-installer/shai-stack-apply"
+grep -Fq 'CORS_ALLOW_ORIGIN: http://127.0.0.1:3000;http://localhost:3000' "$TEST_DIR/root/usr/lib/shai-installer/shai-stack-apply"
+grep -Fq 'TOOL_SERVER_CONNECTIONS' "$TEST_DIR/root/usr/lib/shai-installer/shai-stack-apply"
+grep -Fq 'ENABLE_PERSISTENT_CONFIG' "$TEST_DIR/root/usr/lib/shai-installer/shai-stack-apply"
+grep -Fq 'openapi.json' "$TEST_DIR/root/usr/lib/shai-installer/shai-control-broker"
+grep -Fq 'Workspace Tools' "$TEST_DIR/root/usr/lib/shai-installer/assets/openwebui/shai-openapi-connection.md"
+grep -Fq 'IPAddressAllow=127.0.0.1/32' "$TEST_DIR/root/usr/lib/systemd/system/shai-control-broker.service"
 if grep -Fq '["llama-cli"' "$TEST_DIR/root/usr/bin/shai-aia"; then
     printf 'AIA must not launch a one-shot llama-cli process for chat.\n' >&2
     exit 1
@@ -353,9 +387,12 @@ if grep -Fq '"Docker"' "$TEST_DIR/root/usr/bin/shai-health"; then
     printf 'SHEALTH still exposes the internal Docker implementation name.\n' >&2
     exit 1
 fi
-grep -Fq '"schema": 3' "$TEST_DIR/root/usr/bin/shai-shapp"
+grep -Fq '"schema": 4' "$TEST_DIR/root/usr/bin/shai-shapp"
 grep -Fq 'remove_container' "$TEST_DIR/root/usr/bin/shai-shapp-apply"
 grep -Fq 'home-assistant:2026.9.3' "$TEST_DIR/root/usr/lib/shai-installer/catalog/shai-stack-services.json"
+grep -Fq 'open-webui:v0.12.5-slim' "$TEST_DIR/root/usr/lib/shai-installer/catalog/shai-stack-services.json"
+grep -Fq 'open-webui' "$TEST_DIR/root/usr/lib/shai-installer/catalog/shapp-apps.json"
+grep -Fq 'network_mode: host' "$TEST_DIR/root/usr/lib/shai-installer/shai-stack-apply"
 grep -Fq 'Host Ubuntu Environment Summary' "$TEST_DIR/root/usr/bin/shai-health"
 grep -Fq 'negative checks / total checks' "$TEST_DIR/root/usr/bin/shai-health"
 grep -Fq 'Estimated energy usage · rolling 24 hours' "$TEST_DIR/root/usr/bin/shai-health"

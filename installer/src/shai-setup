@@ -34,6 +34,11 @@ SUMMARY = Path(
 GREEN = "#33EE33"
 
 CSS = b"""
+headerbar, headerbar.titlebar { background: #111812; color: #DDFBE0; border-bottom: 1px solid #354837; box-shadow: none; }
+headerbar label, headerbar .title, headerbar .subtitle { color: #DDFBE0; }
+headerbar button, windowcontrols button { background: #1A2B1D; color: #DDFBE0; }
+headerbar button:hover, windowcontrols button:hover { background: #304B35; color: #FFFFFF; }
+headerbar:backdrop, headerbar:backdrop label { background: #111812; color: #A7B7AA; }
 window { background: #0B0F0C; color: #DDFBE0; }
 .setup-shell { background: #0B0F0C; }
 .brand-header { background: #0B0F0C; border-bottom: 1px solid #263A2B; padding: 14px 22px; }
@@ -101,6 +106,11 @@ class SetupWindow(Gtk.ApplicationWindow):
 
     def __init__(self, app: Gtk.Application) -> None:
         super().__init__(application=app, title="SHAI Setup")
+        titlebar = Gtk.HeaderBar()
+        titlebar.add_css_class("titlebar")
+        titlebar.set_title_widget(Gtk.Label(label="SHAI Setup"))
+        titlebar.set_show_title_buttons(True)
+        self.set_titlebar(titlebar)
         self.set_default_size(1040, 720)
         self.set_size_request(780, 600)
         self.index = 0
@@ -507,7 +517,12 @@ class SetupWindow(Gtk.ApplicationWindow):
         self.apply_status.set_text(
             "The terminal is open. Enter your sudo password there, then leave it open while SHAI applies and verifies your requested changes."
         )
-        subprocess.Popen(command, start_new_session=True)
+        try:
+            subprocess.Popen(command, start_new_session=True)
+        except OSError as exc:
+            self.apply_status.set_text(f"Could not open the terminal: {exc}")
+            self.apply_button.set_sensitive(True)
+            return
         self.poll_count = 0
         GLib.timeout_add_seconds(1, self.poll_result)
 
@@ -548,9 +563,10 @@ class SetupWindow(Gtk.ApplicationWindow):
 
     @staticmethod
     def launch_shell(mode: str) -> subprocess.Popen | None:
-        executable = shutil.which("shai-wave-a-shell")
+        executable = shutil.which("shai-shapp" if mode == "shapp" else "shai-wave-a-shell")
         if executable:
-            return subprocess.Popen([executable, mode], start_new_session=True)
+            command = [executable] if mode == "shapp" else [executable, mode]
+            return subprocess.Popen(command, start_new_session=True)
         return None
 
     def close_home_open_shapp(self, _button: Gtk.Button) -> None:

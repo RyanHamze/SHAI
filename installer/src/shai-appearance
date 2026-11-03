@@ -21,6 +21,11 @@ BRAND = Path("/usr/share/shai/branding/shai-lockup-dark.svg")
 SHAI_WALLPAPER = Path("/usr/share/backgrounds/shai/shai-wallpaper-1920x1080.png")
 STATUS = Path.home() / ".local/state/shai-theme/status.json"
 CSS = b"""
+headerbar, headerbar.titlebar { background: #111812; color: #DDFBE0; border-bottom: 1px solid #354837; box-shadow: none; }
+headerbar label, headerbar .title, headerbar .subtitle { color: #DDFBE0; }
+headerbar button, windowcontrols button { background: #1A2B1D; color: #DDFBE0; }
+headerbar button:hover, windowcontrols button:hover { background: #304B35; color: #FFFFFF; }
+headerbar:backdrop, headerbar:backdrop label { background: #111812; color: #A7B7AA; }
 window { background: #0B0F0C; color: #DDFBE0; }
 .header { background: #111812; border-bottom: 1px solid #263A2B; padding: 14px 20px; }
 .content { padding: 24px; }
@@ -69,6 +74,11 @@ class AppearanceWindow(Gtk.ApplicationWindow):
 
     def __init__(self, app: Gtk.Application) -> None:
         super().__init__(application=app, title="SHAI Appearance")
+        titlebar = Gtk.HeaderBar()
+        titlebar.add_css_class("titlebar")
+        titlebar.set_title_widget(Gtk.Label(label="SHAI Appearance"))
+        titlebar.set_show_title_buttons(True)
+        self.set_titlebar(titlebar)
         self.set_default_size(760, 680)
         self.set_size_request(620, 560)
 

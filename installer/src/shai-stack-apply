@@ -7,6 +7,7 @@ import argparse
 import json
 import os
 import platform
+import pwd
 import secrets
 import shutil
 import subprocess
@@ -22,7 +23,7 @@ DATA = Path("/var/lib/shai/stack")
 STATE = DATA / "installed.json"
 REGISTRY = ETC / "service-registry.json"
 LOCK = STACK / "images.lock.json"
-SUPPORTED = {"mosquitto", "home-assistant", "zigbee2mqtt"}
+SUPPORTED = {"mosquitto", "home-assistant", "zigbee2mqtt", "open-webui", 'esphome', 'node-red', 'openhab', 'jellyfin', 'plex', 'emby', 'navidrome', 'zwavejs', 'adguard-home', 'pi-hole', 'emoncms', 'matter-server'}
 
 
 def run(args: list[str], *, input_text: str | None = None, capture: bool = False) -> str:
@@ -158,6 +159,45 @@ def ensure_mqtt_credentials(image: str) -> tuple[str, str]:
     return username, password
 
 
+def aia_credentials() -> tuple[str, str]:
+    """Return the selected desktop user's local AIA API key and a stable UI secret."""
+    user = os.environ.get("SUDO_USER", "")
+    if not user:
+        raise SystemExit("Open WebUI requires SHAPP to run from a desktop user's visible sudo terminal")
+    try:
+        home = Path(pwd.getpwnam(user).pw_dir)
+    except KeyError as exc:
+        raise SystemExit(f"Open WebUI desktop user does not exist: {user}") from exc
+    config_path = home / ".config/shai/aia.json"
+    key_path = home / ".local/state/shai/aia/server-api-key"
+    try:
+        active = str(json.loads(config_path.read_text(encoding="utf-8")).get("active_model", ""))
+        api_key = key_path.read_text(encoding="utf-8").strip()
+    except (OSError, json.JSONDecodeError) as exc:
+        raise SystemExit("Open AIA, choose an active local model, and wait for its model service before installing Open WebUI") from exc
+    if not active or not api_key:
+        raise SystemExit("Open AIA, choose an active local model, and wait for its model service before installing Open WebUI")
+    secret_path = SECRETS / "open-webui-secret"
+    if secret_path.exists():
+        webui_secret = secret_path.read_text(encoding="utf-8").strip()
+    else:
+        webui_secret = secrets.token_urlsafe(48)
+        secret_path.write_text(webui_secret + "\n", encoding="utf-8")
+        secret_path.chmod(0o600)
+    return api_key, webui_secret
+
+
+def control_credentials() -> str:
+    """Ensure and return the proposal-only Open WebUI credential."""
+    token_path = SECRETS / "control-webui-token"
+    if token_path.exists():
+        return token_path.read_text(encoding="utf-8").strip()
+    value = secrets.token_urlsafe(48)
+    token_path.write_text(value + "\n", encoding="utf-8")
+    token_path.chmod(0o600)
+    return value
+
+
 def compose_text(
     selected: set[str],
     catalog: dict[str, dict[str, object]],
@@ -224,6 +264,70 @@ def compose_text(
             "    ports:", "      - 127.0.0.1:8080:8080",
             "    networks: [shai-automation]", "    profiles: [zigbee2mqtt]",
         ]
+    if "open-webui" in selected:
+        lines += [
+            "  open-webui:", f"    image: {catalog['open-webui']['image']}",
+            "    container_name: shai-open-webui", "    restart: unless-stopped",
+            "    network_mode: host", "    security_opt: [no-new-privileges:true]",
+            "    cap_drop: [ALL]", "    environment:",
+            "      HOST: 127.0.0.1", "      PORT: '3000'", "      WEBUI_AUTH: 'true'",
+            "      ENABLE_SIGNUP: 'true'", "      ENABLE_OLLAMA_API: 'false'",
+            "      ENABLE_OPENAI_API: 'true'", "      OPENAI_API_BASE_URL: http://127.0.0.1:11435/v1",
+            "      OPENAI_API_KEY: ${AIA_API_KEY}", "      WEBUI_SECRET_KEY: ${OPEN_WEBUI_SECRET}",
+            "      ENABLE_PERSISTENT_CONFIG: 'false'", "      ENABLE_TOOL_SERVERS: 'true'",
+            "      TOOL_SERVER_CONNECTIONS: '[{\"type\":\"openapi\",\"url\":\"http://127.0.0.1:11500\",\"spec_type\":\"url\",\"spec\":\"\",\"path\":\"openapi.json\",\"auth_type\":\"bearer\",\"key\":\"${SHAI_CONTROL_TOKEN}\",\"config\":{\"enable\":true},\"info\":{\"id\":\"shai-local-control\",\"name\":\"SHAI Local Control\",\"description\":\"Read SHAI inventory and create approval-required proposals.\"}}]'",
+            "      SHAI_CONTROL_URL: http://127.0.0.1:11500/v1",
+            "      SHAI_CONTROL_TOKEN: ${SHAI_CONTROL_TOKEN}",
+            "      OFFLINE_MODE: 'true'", "      HF_HUB_OFFLINE: '1'",
+            "      DO_NOT_TRACK: 'true'", "      ANONYMIZED_TELEMETRY: 'false'",
+            "      CORS_ALLOW_ORIGIN: http://127.0.0.1:3000;http://localhost:3000",
+            "      REFERRER_POLICY: no-referrer", "      XCONTENT_TYPE: nosniff",
+            "      XFRAME_OPTIONS: SAMEORIGIN",
+            "    volumes:", "      - /var/lib/shai/stack/openwebui:/app/backend/data",
+            "    tmpfs:", "      - /tmp:rw,noexec,nosuid,size=64m",
+            "    profiles: [open-webui]",
+        ]
+    for service in sorted(selected):
+        entry = catalog[service]
+        recipe = entry.get('generic')
+        if not recipe:
+            continue
+        block = {
+            'image': entry['image'], 'container_name': f'shai-{service}', 'restart': 'unless-stopped',
+            'security_opt': ['no-new-privileges:true'],
+            'ports': [f"127.0.0.1:{entry['ports'][0]['port']}:{recipe['container_port']}"],
+            'volumes': [f"{DATA / service / mount['folder']}:{mount['target']}" + (':ro' if mount['folder'] == 'media' else '') for mount in recipe['mounts']],
+            'networks': ['shai-lan'] if recipe.get('outbound') else ['shai-automation'],
+            'profiles': [service],
+            'logging': {'driver': 'json-file', 'options': {'max-size': '10m', 'max-file': '3'}},
+        }
+        if service == 'esphome':
+            block['command'] = ['dashboard', '/config', '--port', '6052']
+        if service == 'zwavejs':
+            block['devices'] = [f'{serial_device()}:/dev/ttyZWave']
+        if service == 'navidrome':
+            block['environment'] = {'ND_ENABLEINSIGHTSCOLLECTOR': 'false'}
+        if service == 'pi-hole':
+            block['environment'] = {'FTLCONF_webserver_api_password': '${PIHOLE_PASSWORD}', 'FTLCONF_dns_listeningMode': 'all'}
+        if service == 'matter-server':
+            block['environment'] = {'LISTEN_ADDRESS':'127.0.0.1','DCL_OFFLINE':'true'}
+        if service == 'emoncms':
+            block['environment'] = {'MYSQL_HOST':'emoncms-db','MYSQL_DATABASE':'emoncms','MYSQL_USER':'emoncms', 'MYSQL_PASSWORD':'${EMONCMS_PASSWORD}',
+                                    'REDIS_ENABLED':'true','REDIS_HOST':'emoncms-redis','MQTT_ENABLED':'false','EMONCMS_DATADIR':'/var/opt/emoncms'}
+            block['depends_on'] = {'emoncms-db': {'condition':'service_healthy'}, 'emoncms-redis': {'condition':'service_started'}}
+            for component, image in entry.get('components', {}).items():
+                extra = {'image':image, 'restart':'unless-stopped','networks':['shai-automation'], 'profiles':[service],
+                         'volumes':[f'{DATA / service / component}:' + ('/var/lib/mysql' if component == 'db' else '/data')],
+                         'logging':{'driver':'json-file','options':{'max-size':'10m','max-file':'3'}}}
+                if component == 'db':
+                    extra['environment'] = {'MYSQL_DATABASE':'emoncms','MYSQL_USER':'emoncms','MYSQL_PASSWORD':'${EMONCMS_PASSWORD}','MYSQL_ROOT_PASSWORD':'${EMONCMS_ROOT_PASSWORD}'}
+                    extra['healthcheck'] = {'test':['CMD','healthcheck.sh','--connect','--innodb_initialized'],'interval':'5s','timeout':'5s','retries':30}
+                lines.append(f'  emoncms-{component}:')
+                for key, value in extra.items():
+                    lines.append(f'    {key}: {json.dumps(value)}')
+        lines.append(f'  {service}:')
+        for key, value in block.items():
+            lines.append(f'    {key}: {json.dumps(value)}')
     lines += [
         "networks:",
         "  shai-automation:",
@@ -247,16 +351,46 @@ def write_configuration(selected: set[str], catalog: dict[str, dict[str, object]
     SECRETS.chmod(0o700); STACK.chmod(0o750)
     for service in SUPPORTED:
         (DATA / service.replace("-", "")).mkdir(parents=True, exist_ok=True)
+    for service in selected:
+        for mount in catalog[service].get('generic', {}).get('mounts', []):
+            directory = DATA / service / mount['folder']
+            if not directory.exists():
+                directory.mkdir(parents=True, exist_ok=True)
+                uid = catalog[service]['generic'].get('uid')
+                if uid:
+                    os.chown(directory, uid, uid)
     zigbee = serial_device() if "zigbee2mqtt" in selected else None
     observer = observer_image()
     pulled = [observer]
     run(["docker", "pull", observer])
+    previous_locks = json.loads(LOCK.read_text()).get('images', {}) if LOCK.exists() else {}
     for item in sorted(selected):
-        image = str(catalog[item]["image"]); run(["docker", "pull", image]); pulled.append(image)
+        image = str(catalog[item]["image"])
+        locked = previous_locks.get(image, [])
+        if locked:
+            catalog[item]['image'] = locked[0]
+            run(['docker', 'image', 'inspect', locked[0]], capture=True)
+        else:
+            run(["docker", "pull", image])
+            digest = json.loads(run(['docker', 'image', 'inspect', image, '--format', '{{json .RepoDigests}}'], capture=True))
+            if not digest:
+                raise SystemExit(f'Pulled image has no immutable digest: {image}')
+            catalog[item]['image'] = digest[0]
+        pulled.append(image)
+        for component, child_image in catalog[item].get('components', {}).items():
+            locked_child = previous_locks.get(child_image, [])
+            if not locked_child:
+                run(['docker','pull',child_image])
+                locked_child = json.loads(run(['docker','image','inspect',child_image,'--format','{{json .RepoDigests}}'],capture=True))
+            if not locked_child:
+                raise SystemExit(f'Missing immutable image digest for {child_image}')
+            catalog[item]['components'][component] = locked_child[0]
+            pulled.append(child_image)
     if "mosquitto" in selected:
         username, password = ensure_mqtt_credentials(str(catalog["mosquitto"]["image"]))
         config = DATA / "mosquitto/config/mosquitto.conf"
-        config.write_text(
+        if not config.exists():
+            config.write_text(
             "listener 1883 0.0.0.0\nallow_anonymous false\n"
             "password_file /mosquitto/config/passwd\npersistence true\n"
             "persistence_location /mosquitto/data/\nlog_dest file /mosquitto/log/mosquitto.log\n",
@@ -264,14 +398,35 @@ def write_configuration(selected: set[str], catalog: dict[str, dict[str, object]
         ); config.chmod(0o644)
         if "zigbee2mqtt" in selected:
             zconfig = DATA / "zigbee2mqtt/configuration.yaml"
-            zconfig.write_text(
+            if not zconfig.exists():
+                zconfig.write_text(
                 "homeassistant: false\npermit_join: false\nfrontend:\n  enabled: true\n  port: 8080\n"
                 f"mqtt:\n  server: mqtt://mosquitto:1883\n  user: {username}\n  password: {password}\n"
                 "serial:\n  port: /dev/ttyZigbee\n",
                 encoding="utf-8",
             ); zconfig.chmod(0o600)
+    webui_env = ""
+    if 'emoncms' in selected:
+        for name in ['EMONCMS_PASSWORD','EMONCMS_ROOT_PASSWORD']:
+            secret_path = SECRETS / name.lower()
+            if not secret_path.exists():
+                secret_path.write_text(secrets.token_urlsafe(32) + '\n'); secret_path.chmod(0o600)
+            webui_env += name + '=' + secret_path.read_text().strip() + '\n'
+    if 'pi-hole' in selected:
+        secret_path = SECRETS / 'pihole-password'
+        if not secret_path.exists():
+            secret_path.write_text(secrets.token_urlsafe(32) + '\n')
+            secret_path.chmod(0o600)
+        webui_env += 'PIHOLE_PASSWORD=' + secret_path.read_text().strip() + '\n'
+        print('Pi-hole setup password is stored in /etc/shai/secrets/pihole-password; not printed in logs.')
+    if "open-webui" in selected:
+        api_key, webui_secret = aia_credentials()
+        control_token = control_credentials()
+        webui_env += f"AIA_API_KEY={api_key}\nOPEN_WEBUI_SECRET={webui_secret}\nSHAI_CONTROL_TOKEN={control_token}\n"
     timezone = Path("/etc/timezone").read_text(encoding="utf-8").strip() if Path("/etc/timezone").exists() else "UTC"
-    (STACK / ".env").write_text(f"TZ={timezone}\n", encoding="utf-8"); (STACK / ".env").chmod(0o600)
+    (STACK / ".env").write_text(f"TZ={timezone}\n{webui_env}", encoding="utf-8"); (STACK / ".env").chmod(0o600)
+    if (STACK / 'compose.yaml').exists():
+        shutil.copy2(STACK / 'compose.yaml', STACK / 'compose.previous.yaml')
     (STACK / "compose.yaml").write_text(
         compose_text(selected, catalog, zigbee, observer), encoding="utf-8"
     )
@@ -285,7 +440,8 @@ def write_configuration(selected: set[str], catalog: dict[str, dict[str, object]
     services = []
     for item in sorted(selected):
         entry = catalog[item]
-        networks = ["shai-automation", "shai-lan"] if item == "home-assistant" else ["shai-automation"]
+        networks = (["host loopback"] if item == "open-webui" else
+                    ["shai-automation", "shai-lan"] if item == "home-assistant" else ["shai-automation"])
         services.append({"id": item, "name": entry["name"], "container": f"shai-{item}",
                          "purpose": f"SHAI managed {entry['name']}", "ports": entry["ports"],
                          "networks": networks})
@@ -306,27 +462,62 @@ def main() -> int:
     requested_remove = {item for item in args.remove.split(",") if item}
     if not requested_install <= SUPPORTED or not requested_remove <= SUPPORTED:
         raise SystemExit("unsupported SHAI stack service ID")
-    final = (installed() | requested_install) - requested_remove
+    if requested_install & requested_remove:
+        raise SystemExit("the same service cannot be installed and removed in one plan")
+    current = installed()
+    final = (current | requested_install) - requested_remove
+    if 'mosquitto' in requested_remove and 'zigbee2mqtt' in final:
+        raise SystemExit("Remove Zigbee2MQTT too before removing its MQTT dependency")
     if "zigbee2mqtt" in final:
         final.add("mosquitto")
     catalog = load_catalog()
-    if final:
+    if final and requested_install:
         hardware_assessment(final, catalog)
     if args.assess:
         print("Assessment only. No Docker, package, service, or file changes were made.")
         return 0
-    if final:
+    if not requested_install:
+        removing = current & requested_remove
+        if removing:
+            if not (STACK / 'compose.yaml').is_file():
+                raise SystemExit('Managed Compose configuration is missing; cannot safely remove services')
+            command = ['docker', 'compose', '--project-directory', str(STACK)]
+            if final:
+                services = set(removing)
+                for service in removing:
+                    services.update(f'{service}-{component}' for component in catalog[service].get('components', {}))
+                # Retain the last configuration and secrets until the next install rebuilds it.
+                # Removing named containers needs no pulls, hardware, or retained-service restart.
+                run([*command, '--profile', '*', 'rm', '--stop', '--force', *sorted(services)])
+            else:
+                run([*command, '--profile', '*', 'down'])
+            if REGISTRY.exists():
+                registry = json.loads(REGISTRY.read_text(encoding='utf-8'))
+                registry['services'] = [entry for entry in registry.get('services', []) if entry['id'] in final]
+                REGISTRY.write_text(json.dumps(registry, indent=2) + '\n', encoding='utf-8')
+                REGISTRY.chmod(0o644)
+    elif final:
         install_engine(); profiles = write_configuration(final, catalog)
         command = ["docker", "compose", "--project-directory", str(STACK)]
         for profile in profiles: command += ["--profile", profile]
-        run([*command, "up", "-d", "--remove-orphans"])
-    elif shutil.which("docker") and (STACK / "compose.yaml").exists():
-        run(["docker", "compose", "--project-directory", str(STACK), "down"])
+        run([*command, 'config', '--quiet'])
+        start_services = {service for service in requested_install & final if not catalog[service].get('generic', {}).get('download_only')}
+        if 'zigbee2mqtt' in start_services:
+            start_services.add('mosquitto')
+        run([*command, "up", "-d", "--remove-orphans", 'engine-observer', *sorted(start_services)])
+        for service in sorted(start_services):
+            state = run(['docker', 'inspect', f'shai-{service}', '--format', '{{.State.Running}}'], capture=True)
+            if state != 'true':
+                raise SystemExit(f'{service} did not remain running; inspect its container logs')
     DATA.mkdir(parents=True, exist_ok=True)
-    STATE.write_text(json.dumps({"schema": 1, "services": sorted(final)}, indent=2) + "\n", encoding="utf-8")
+    staged = [service for service in final if catalog[service].get('generic', {}).get('download_only')]
+    STATE.write_text(json.dumps({"schema": 1, "services": sorted(final), 'staged_services': sorted(staged)}, indent=2) + "\n", encoding="utf-8")
     STATE.chmod(0o644)
-    run(["systemctl", "enable", "--now", "shai-network-snapshot.timer"])
+    if requested_install:
+        run(["systemctl", "enable", "--now", "shai-network-snapshot.timer"])
     print("SHAI Advanced stack applied. Persistent data was preserved.")
+    if staged:
+        print('Runtime images staged, NOT activated (network permission/configuration required): ' + ', '.join(staged))
     return 0
 
 

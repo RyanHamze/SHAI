@@ -410,7 +410,7 @@ if "org.gnome.Nautilus.desktop" not in items:
     items.insert(0, "org.gnome.Nautilus.desktop")
 if "org.gnome.Ptyxis.desktop" not in items:
     items.append("org.gnome.Ptyxis.desktop")
-for desktop_id in ("shai-home.desktop", "shai-shapp.desktop"):
+for desktop_id in ("shai-home.desktop", "shai-shapp.desktop", "com.aabey.shai.AIA.desktop"):
     if pathlib.Path("/usr/share/applications", desktop_id).exists() and desktop_id not in items:
         items.append(desktop_id)
 print("[" + ", ".join(repr(item) for item in items) + "]")
@@ -546,6 +546,9 @@ install_desktop_launcher() {
     elif [[ "$launcher" == shai-aia.desktop ]]; then
         install -m 0644 "$LIB_DIR/assets/launchers/$launcher" \
             /usr/share/applications/com.aabey.shai.AIA.desktop
+    elif [[ "$launcher" == shai-control.desktop ]]; then
+        install -m 0644 "$LIB_DIR/assets/launchers/$launcher" \
+            /usr/share/applications/com.aabey.shai.Control.desktop
     fi
     if [[ -d "$desktop_dir" ]]; then
         run_as_user install -m 0755 \
@@ -694,6 +697,8 @@ fi
 install_validated_policy
 apply_wave_a_branding_and_choices
 systemctl daemon-reload
+"$LIB_DIR/shai-secret-migrate"
+systemctl enable --now shai-control-broker.service
 systemctl enable --now shai-network-snapshot.timer
 clear_expected_removed_unit_failures
 health_check

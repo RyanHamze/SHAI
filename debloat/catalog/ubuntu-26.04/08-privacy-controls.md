@@ -12,5 +12,5 @@
   permitted application retains a location grant.
 - Disable Events and Tasks notifications and all GNOME Online Accounts
   providers. Do not delete existing account credentials during base setup.
-- Disable media sharing, Wellbeing history/limits/reminders, and automatic time
-  synchronization. Report the manual-time requirement at completion.
+- Disable media sharing and Wellbeing history/limits/reminders. Keep Ubuntu
+  automatic date and time synchronization enabled and report its state at completion.

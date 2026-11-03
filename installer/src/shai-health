@@ -52,6 +52,11 @@ DEFAULTS = {
 }
 
 CSS = b"""
+headerbar, headerbar.titlebar { background: #111812; color: #DDFBE0; border-bottom: 1px solid #354837; box-shadow: none; }
+headerbar label, headerbar .title, headerbar .subtitle { color: #DDFBE0; }
+headerbar button, windowcontrols button { background: #1A2B1D; color: #DDFBE0; }
+headerbar button:hover, windowcontrols button:hover { background: #304B35; color: #FFFFFF; }
+headerbar:backdrop, headerbar:backdrop label { background: #111812; color: #A7B7AA; }
 window { background: #0B0F0C; color: #DDFBE0; }
 .header { background: #0B0F0C; border-bottom: 1px solid #263A2B; padding: 12px 18px; }
 .title { color: #DDFBE0; font-size: 22px; font-weight: 700; }
@@ -166,7 +171,9 @@ class HealthStore:
             sample["rx"], sample["tx"], sample["energy_wh"], sample["docker_total"],
             sample["docker_healthy"], ts,
         )
-        self.db.execute("INSERT OR REPLACE INTO samples VALUES (?,?,?,?,?,?,?,?,?,?,?)", values)
+        inserted = self.db.execute("INSERT OR IGNORE INTO samples VALUES (?,?,?,?,?,?,?,?,?,?,?)", values)
+        if not inserted.rowcount:
+            return
         status = worst_status(sample, settings)
         negative, checks = sample_check_counts(sample, settings)
         hour = ts - ts % 3600
@@ -285,7 +292,8 @@ def cpu_counters() -> tuple[int, int]:
     fields = read_text("/proc/stat").splitlines()[0].split()[1:]
     values = [int(value) for value in fields]
     idle = values[3] + (values[4] if len(values) > 4 else 0)
-    return sum(values), idle
+    # Guest time is already included in user/nice counters by the kernel.
+    return sum(values[:8]), idle
 
 
 def net_sample() -> tuple[int, int, list[dict[str, object]]]:
@@ -323,10 +331,35 @@ def disk_sample(mount: str = "/") -> dict[str, object]:
                 "inodes_total": 0, "inodes_free": 0}
 
 
+def read_snapshot() -> dict[str, object]:
+    snapshot = json.loads(NETWORK_SNAPSHOT.read_text(encoding="utf-8"))
+    if not isinstance(snapshot, dict):
+        raise ValueError("snapshot is not an object")
+    generated = snapshot.get("generated_at")
+    if not isinstance(generated, (int, float)) or not 0 <= time.time() - generated <= 90:
+        raise ValueError("snapshot timestamp is missing, stale or in the future")
+    for key in ("containers", "connections", "container_events"):
+        rows = snapshot.get(key, [])
+        if not isinstance(rows, list) or any(not isinstance(row, dict) for row in rows):
+            raise ValueError(f"invalid {key} in snapshot")
+    for item in snapshot.get("containers", []):
+        networks = item.get("networks", {})
+        if not isinstance(networks, dict) or any(not isinstance(value, dict) for value in networks.values()):
+            raise ValueError("invalid container networks")
+        for key in ("cpu_percent", "memory_usage", "memory_limit"):
+            if not isinstance(item.get(key, 0), (int, float)):
+                raise ValueError(f"invalid container {key}")
+    for event in snapshot.get("container_events", []):
+        actor = event.get("Actor", {})
+        if not isinstance(actor, dict) or not isinstance(actor.get("Attributes", {}), dict):
+            raise ValueError("invalid container event actor")
+    return snapshot
+
+
 def docker_snapshot(details: bool = False) -> dict[str, object]:
     del details
     try:
-        snapshot = json.loads(NETWORK_SNAPSHOT.read_text(encoding="utf-8"))
+        snapshot = read_snapshot()
         observer = snapshot.get("observer", {})
         containers = snapshot.get("containers", [])
         events = snapshot.get("container_events", [])
@@ -337,7 +370,7 @@ def docker_snapshot(details: bool = False) -> dict[str, object]:
     if not observer.get("available"):
         return {"available": False, "error": observer.get("error", "Service observer is unavailable"), "containers": [], "events": []}
     healthy = sum(
-        item.get("status") == "running" and item.get("health") != "unhealthy"
+        item.get("status") == "running" and item.get("health") in {"healthy", "not configured"}
         for item in containers
     )
     running = sum(item.get("status") == "running" for item in containers)
@@ -437,6 +470,11 @@ class HealthWindow(Gtk.ApplicationWindow):
 
     def __init__(self, app: Gtk.Application) -> None:
         super().__init__(application=app, title="SHEALTH - SHAI Health")
+        titlebar = Gtk.HeaderBar()
+        titlebar.add_css_class("titlebar")
+        titlebar.set_title_widget(Gtk.Label(label="SHEALTH - SHAI Health"))
+        titlebar.set_show_title_buttons(True)
+        self.set_titlebar(titlebar)
         self.set_default_size(1180, 760)
         self.set_size_request(940, 620)
         self.settings = load_settings()
@@ -741,7 +779,7 @@ class HealthWindow(Gtk.ApplicationWindow):
             button = Gtk.Button(label=f"{item['name']}  ↓ {human_bytes(item['rx'])}  ↑ {human_bytes(item['tx'])}  errors {item['rx_errors'] + item['tx_errors']}  drops {item['rx_drop'] + item['tx_drop']}")
             button.add_css_class("row"); box.append(button)
         try:
-            snapshot = json.loads(NETWORK_SNAPSHOT.read_text(encoding="utf-8"))
+            snapshot = read_snapshot()
             generated = int(snapshot.get("generated_at", 0))
             age = max(0, int(time.time()) - generated)
             connections = snapshot.get("connections", [])
