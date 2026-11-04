@@ -27,6 +27,7 @@ python3 tests/test-ui-wiring.py
 python3 tests/test-update-tasks.py
 python3 tests/test-launcher-sync.py
 python3 tests/test-setup-policy.py
+python3 tests/test-bootstrap.py
 [[ "$(dpkg-deb --field "$deb" Architecture)" == amd64 ]]
 [[ "$(dpkg-deb --field "$deb" Package)" == shai-installer ]]
 control_listing="$(dpkg-deb --ctrl-tarfile "$deb" | tar -tf -)"
