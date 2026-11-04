@@ -8,6 +8,10 @@ app = setup.SetupApplication()
 app.set_flags(app.get_flags() | Gio.ApplicationFlags.NON_UNIQUE)
 assert app.register(None)
 window = setup.SetupWindow(app)
+assert window.offline_mode.get_active(), 'Offline operation must be selected by default'
+assert window.apply_status.get_use_markup()
+assert '#33EE33' in window.apply_status.get_label()
+print('PASS offline default and green Ready status', flush=True)
 for index, name in enumerate(window.STEPS):
     window.show_step(index)
     assert window.stack.get_visible_child() is not None

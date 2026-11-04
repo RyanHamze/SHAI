@@ -3,7 +3,7 @@ set -Eeuo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 readonly ROOT
-readonly VERSION="0.12.0"
+readonly VERSION="0.13.1"
 readonly PACKAGE="shai-installer_${VERSION}_amd64"
 BUILD_ROOT="$(mktemp -d "/tmp/shai-installer-build-${VERSION}.XXXXXX")"
 readonly BUILD_ROOT
@@ -46,6 +46,8 @@ install -m 0755 "$ROOT/installer/src/shai-shapp-apply" "$STAGE/usr/bin/shai-shap
 install -m 0755 "$ROOT/installer/src/shai-stack-apply" "$STAGE/usr/lib/shai-installer/shai-stack-apply"
 install -m 0755 "$ROOT/installer/src/shai-app-install" "$STAGE/usr/lib/shai-installer/shai-app-install"
 install -m 0755 "$ROOT/installer/src/shai-source-install" "$STAGE/usr/lib/shai-installer/shai-source-install"
+install -m 0755 "$ROOT/installer/src/shai-update-apply" "$STAGE/usr/lib/shai-installer/shai-update-apply"
+install -m 0755 "$ROOT/installer/src/shai-launcher-sync" "$STAGE/usr/lib/shai-installer/shai-launcher-sync"
 install -m 0755 "$ROOT/installer/src/shai-network-snapshot" "$STAGE/usr/lib/shai-installer/shai-network-snapshot"
 install -m 0755 "$ROOT/installer/src/shai-shapp-log" "$STAGE/usr/lib/shai-installer/shai-shapp-log"
 install -m 0755 "$ROOT/installer/src/shai-health" "$STAGE/usr/bin/shai-health"
@@ -67,7 +69,6 @@ install -m 0755 "$ROOT/installer/src/shai-theme-apply" "$STAGE/usr/bin/shai-them
 install -m 0755 "$ROOT/installer/src/shai-theme-reset" "$STAGE/usr/bin/shai-theme-reset"
 install -m 0755 "$ROOT/installer/src/shai-theme-default" "$STAGE/usr/bin/shai-theme-default"
 install -m 0755 "$ROOT/installer/src/shai-terminal-theme-apply" "$STAGE/usr/bin/shai-terminal-theme-apply"
-install -m 0755 "$ROOT/installer/src/shai-appearance" "$STAGE/usr/bin/shai-appearance"
 install -m 0755 "$ROOT/installer/src/shai-plan-validator" "$STAGE/usr/lib/shai-installer/shai-plan-validator"
 install -m 0755 "$ROOT/installer/src/shai-system-summary" "$STAGE/usr/lib/shai-installer/shai-system-summary"
 install -m 0755 "$ROOT/tools/collect_debloat_benchmark.sh" "$STAGE/usr/lib/shai-installer/collect-debloat-benchmark"
@@ -75,6 +76,7 @@ install -m 0755 "$ROOT/tools/configure_manual_updates.sh" "$STAGE/usr/lib/shai-i
 install -m 0755 "$ROOT/tools/restore_automatic_updates.sh" "$STAGE/usr/lib/shai-installer/restore-automatic-updates"
 install -m 0644 "$ROOT/debloat/PROTECTED_PACKAGES.regex" "$STAGE/usr/lib/shai-installer/PROTECTED_PACKAGES.regex"
 install -m 0644 "$ROOT/installer/catalog/shapp-apps.json" "$STAGE/usr/lib/shai-installer/catalog/shapp-apps.json"
+install -m 0644 "$ROOT/installer/catalog/shapp-updates.json" "$STAGE/usr/lib/shai-installer/catalog/shapp-updates.json"
 install -m 0644 "$ROOT/installer/catalog/shai-stack-services.json" "$STAGE/usr/lib/shai-installer/catalog/shai-stack-services.json"
 install -m 0644 "$ROOT/installer/systemd/shai-network-snapshot.service" "$STAGE/usr/lib/systemd/system/shai-network-snapshot.service"
 install -m 0644 "$ROOT/installer/systemd/shai-network-snapshot.timer" "$STAGE/usr/lib/systemd/system/shai-network-snapshot.timer"
@@ -113,7 +115,7 @@ install -m 0644 "$ROOT/docs/SHAPP_INSTALL_BACKENDS.md" "$STAGE/usr/share/doc/sha
 install -m 0644 "$ROOT/docs/RELEASE_0_12_0_AUDIT.md" "$STAGE/usr/share/doc/shai-installer/RELEASE_0_12_0_AUDIT.md"
 install -m 0644 "$ROOT/installer/share/applications/shai-setup.desktop" "$STAGE/usr/share/applications/shai-setup.desktop"
 install -m 0644 "$ROOT/installer/share/applications/shai-control.desktop" "$STAGE/usr/share/applications/shai-control.desktop"
-for launcher in shai-home.desktop shai-shapp.desktop shai-health.desktop shai-aia.desktop shai-appearance.desktop shai-control.desktop; do
+for launcher in shai-setup.desktop shai-shapp.desktop shai-health.desktop shai-aia.desktop shai-control.desktop; do
     install -m 0644 "$ROOT/installer/share/applications/$launcher" "$STAGE/usr/lib/shai-installer/assets/launchers/$launcher"
 done
 install -m 0644 "$ROOT/branding/SHAI_Brand_v2/shai-lockup-dark.svg" "$STAGE/usr/share/shai/branding/shai-lockup-dark.svg"

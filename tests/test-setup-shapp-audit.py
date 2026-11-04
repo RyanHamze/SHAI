@@ -56,6 +56,45 @@ class Isolated(unittest.TestCase):
 
 
 class SetupCallbacks(Isolated):
+    def test_handoff_is_independent_and_waits_before_closing(self):
+        window = object.__new__(setup.SetupWindow)
+        window.show_message = Mock()
+        window.close = Mock()
+        with patch.object(setup.shutil, 'which', side_effect=lambda name: '/usr/bin/' + name), patch.object(setup.subprocess, 'run') as run, patch.object(setup.GLib, 'timeout_add', create=True) as later:
+            window.close_home_open_shapp(None)
+        command = run.call_args.args[0]
+        self.assertEqual(command[0], '/usr/bin/systemd-run')
+        self.assertIn('--user', command)
+        self.assertEqual(command[-1], '/usr/bin/shai-shapp')
+        later.assert_called_once()
+        window.close.assert_not_called()
+
+    def test_failed_handoff_leaves_setup_open(self):
+        window = object.__new__(setup.SetupWindow)
+        window.show_message = Mock()
+        window.close = Mock()
+        with patch.object(setup.shutil, 'which', return_value='/usr/bin/test'), patch.object(setup.subprocess, 'run', side_effect=OSError('session unavailable')):
+            window.close_home_open_shapp(None)
+        window.show_message.assert_called_once()
+        window.close.assert_not_called()
+
+    def test_successful_handoff_closes_setup(self):
+        window = object.__new__(setup.SetupWindow)
+        window.show_message = Mock()
+        window.close = Mock()
+        with patch.object(setup.subprocess, 'run', return_value=SimpleNamespace(returncode=0)):
+            self.assertFalse(window.finish_shapp_handoff('test-unit'))
+        window.close.assert_called_once()
+
+    def test_existing_shapp_window_counts_as_success(self):
+        window = object.__new__(setup.SetupWindow)
+        window.show_message = Mock()
+        window.close = Mock()
+        with patch.object(setup.subprocess, 'run', side_effect=[SimpleNamespace(returncode=3), SimpleNamespace(returncode=0, stdout='(true,)\n')]):
+            self.assertFalse(window.finish_shapp_handoff('exited-launcher'))
+        window.close.assert_called_once()
+        window.show_message.assert_not_called()
+
     def test_handoff_launches_real_shapp(self):
         with patch.object(setup.shutil, 'which', side_effect=lambda name: '/usr/bin/' + name), patch.object(setup.subprocess, 'Popen') as launch:
             setup.SetupWindow.launch_shell('shapp')
@@ -209,6 +248,28 @@ class ShappCallbacks(Isolated):
 
 
 class ApplySafety(Isolated):
+    def test_schema5_dispatches_update_only_plan(self):
+        runner = self.invoke({'schema': 5, 'updates': ['apt-refresh', 'apt-autoclean']})
+        with patch.object(apply, 'LIB', ROOT / 'installer'):
+            self.assertEqual(apply.main(), 0)
+        self.assertEqual(len(runner.call_args_list), 1)
+        command = runner.call_args.args[0]
+        self.assertIn('shai-update-apply', command[1])
+        self.assertEqual(command[-2:], ['--tasks', 'apt-refresh,apt-autoclean'])
+
+    def test_unknown_update_rejected_before_commands(self):
+        runner = self.invoke({'schema': 5, 'updates': ['run-arbitrary-command']})
+        with patch.object(apply, 'LIB', ROOT / 'installer'):
+            with self.assertRaisesRegex(apply.PlanRejected, 'unknown maintenance'):
+                apply.main()
+        runner.assert_not_called()
+
+    def test_duplicate_updates_rejected(self):
+        runner = self.invoke({'schema': 5, 'updates': ['apt-refresh', 'apt-refresh']})
+        with self.assertRaisesRegex(apply.PlanRejected, 'duplicates'):
+            apply.main()
+        runner.assert_not_called()
+
     def test_backend_lock_blocks_duplicate_apply(self):
         apply.STATE.mkdir()
         with (apply.STATE / 'shapp-apply.lock').open('a') as lock:

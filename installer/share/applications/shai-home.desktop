@@ -1,10 +1,11 @@
 [Desktop Entry]
 Type=Application
-Name=SHAI Home
-Comment=Open the SHAI home appliance dashboard
-Exec=shai-wave-a-shell home
+Name=SHAI Setup
+Comment=Configure Smart Home Automation and AI on Ubuntu
+Exec=shai-setup
 Icon=shai-dashboard
 Terminal=false
 Categories=System;Utility;
 Keywords=SHAI;home;dashboard;
 StartupNotify=true
+NoDisplay=true

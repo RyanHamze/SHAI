@@ -178,9 +178,11 @@ def apply_plan() -> int:
         "schema", "plan_id", "target_user", "architecture",
         "install", "remove_apt", "remove_snap", "remove_container",
     }
-    if data.get('schema') == 4:
+    if data.get('schema') in {4, 5}:
         expected.add('remove_managed')
-    if set(data) != expected or data.get("schema") not in {3, 4}:
+    if data.get('schema') == 5:
+        expected.add('updates')
+    if set(data) != expected or data.get("schema") not in {3, 4, 5}:
         fail("unexpected plan schema or fields")
     plan_id = data.get("plan_id")
     user = data.get("target_user")
@@ -201,12 +203,20 @@ def apply_plan() -> int:
         fail("plan owner does not match target user")
     LOG_USER = user
     data.setdefault('remove_managed', [])
-    for field in ("install", "remove_apt", "remove_snap", "remove_container", 'remove_managed'):
+    data.setdefault('updates', [])
+    for field in ("install", "remove_apt", "remove_snap", "remove_container", 'remove_managed', 'updates'):
         value = data.get(field)
         if not isinstance(value, list) or any(not isinstance(item, str) for item in value):
             fail(f"{field} must be a list of strings")
         if len(value) != len(set(value)) or len(value) > 200:
             fail(f"{field} contains duplicates or too many entries")
+    if data['updates']:
+        try:
+            supported_updates = {task['id'] for task in json.loads((LIB / 'catalog/shapp-updates.json').read_text())['tasks']}
+        except (OSError, ValueError, KeyError, TypeError):
+            fail('maintenance catalog unavailable; reinstall SHAI before retrying')
+        if not set(data['updates']) <= supported_updates:
+            fail('unknown maintenance task')
 
     catalog = load_catalog()
     install_ids = data["install"]
@@ -278,7 +288,7 @@ def apply_plan() -> int:
         f"architecture={architecture}; install={','.join(install_packages) or '-'}; "
         f"containers={','.join(install_containers) or '-'}; "
         f"remove_apt={','.join(remove_apt) or '-'}; remove_snap={','.join(remove_snap) or '-'}; "
-        f"remove_containers={','.join(remove_containers) or '-'}",
+        f"remove_containers={','.join(remove_containers) or '-'}; updates={','.join(data['updates']) or '-'}",
     )
     try:
         if install_packages:
@@ -321,6 +331,9 @@ def apply_plan() -> int:
             for app_id in ids:
                 run([str(LIB / 'shai-app-install'), action, app_id, '--user', user])
                 audit(user, 'INSTALLED' if action == 'install' else 'UNINSTALLED', 'managed', app_id, f'approved SHAPP plan {plan_id}')
+        if data['updates']:
+            run([sys.executable, str(LIB / 'shai-update-apply'), '--user', user,
+                 '--tasks', ','.join(data['updates'])])
     except (subprocess.CalledProcessError, OSError, PlanRejected) as exc:
         detail = str(exc) + '\n' + str(getattr(exc, 'output', '') or '')[-2000:]
         if 'not valid yet' in detail:
