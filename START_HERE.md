@@ -1,5 +1,11 @@
 # Start the SHAI installer implementation
 
+Current package: **0.13.1**, Ubuntu Desktop 26.04 amd64. Start with
+[Install From GitHub](docs/INSTALL_FROM_GITHUB.md) for the authenticated test
+command. Older version descriptions below are historical context, not the
+current package or installation procedure. Home/Appearance launchers have been
+retired; Setup remains in the application menu, with no login autostart.
+
 Read `PROJECT_CONTEXT.md` for shared memory, completed work, current assignments and relevant file locations before loading detailed history.
 
 Read `docs/SHAI_INSTALLER_PLAN.md`, then `docs/CURRENT_DECISIONS.md`, which takes precedence where the latest user clarifications differ. Use `docs/SHAI_APP_APPROVAL_CATALOG.md` as the central product map for the proposed SHAI apps, their boundaries, status, sample views, and pending approval decisions. This is the clean SHAI workspace.

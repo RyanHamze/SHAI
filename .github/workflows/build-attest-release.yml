@@ -24,6 +24,7 @@ jobs:
       - name: Static analysis
         run: |
           shellcheck \
+            install.sh \
             installer/build.sh \
             installer/src/shai-installer \
             installer/src/shai-theme-apply \
