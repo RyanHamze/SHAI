@@ -1,0 +1,11 @@
+[Unit]
+Description=Keep SHAI local context current without online access
+
+[Timer]
+OnStartupSec=20
+OnUnitActiveSec=30
+AccuracySec=5
+Unit=shai-context.service
+
+[Install]
+WantedBy=timers.target

@@ -3,7 +3,7 @@ set -Eeuo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 readonly ROOT
-readonly PACKAGE="${1:-$ROOT/dist/shai-installer_0.13.1_amd64.deb}"
+readonly PACKAGE="${1:-$ROOT/dist/shai-installer_0.14.0_amd64.deb}"
 TEST_DIR="$(mktemp -d /tmp/shai-wave-a-package-test.XXXXXX)"
 readonly TEST_DIR
 USER_NAME="$(id -un)"
@@ -28,6 +28,8 @@ python3 -m py_compile \
     "$ROOT/installer/src/shai-health" \
     "$ROOT/installer/src/shai-aia" \
     "$ROOT/installer/src/shai-aia-server" \
+    "$ROOT/installer/src/shai-context" \
+    "$ROOT/installer/src/shai-context-gateway" \
     "$ROOT/installer/src/shai-control-broker" \
     "$ROOT/installer/src/shai-control" \
     "$ROOT/installer/src/shai-control-approve" \
@@ -76,7 +78,7 @@ assert "internal: true" in compose
 webui = module.compose_text({"open-webui"}, catalog["services"], None, observer)
 assert "network_mode: host" in webui
 assert "HOST: 127.0.0.1" in webui
-assert "OPENAI_API_BASE_URL: http://127.0.0.1:11435/v1" in webui
+assert "OPENAI_API_BASE_URL: http://127.0.0.1:11437/v1" in webui
 assert "OPENAI_API_KEY: ${AIA_API_KEY}" in webui
 PY
 
@@ -150,11 +152,12 @@ dpkg-deb --control "$PACKAGE" "$TEST_DIR/control"
 mapfile -t control_files < <(
     find "$TEST_DIR/control" -mindepth 1 -maxdepth 1 -type f -printf '%f\n' | sort
 )
-[[ "${control_files[*]}" == control ]] || {
-    printf 'Package must be inert; unexpected maintainer files: %s\n' \
+[[ "${control_files[*]}" == 'control prerm' ]] || {
+    printf 'Package must have only control and removal-only prerm: %s\n' \
         "${control_files[*]}" >&2
     exit 1
 }
+bash -n "$TEST_DIR/control/prerm"
 
 dpkg-deb --extract "$PACKAGE" "$TEST_DIR/root"
 bash -n "$TEST_DIR/root/usr/bin/shai-installer"
@@ -168,6 +171,8 @@ python3 -m py_compile \
     "$TEST_DIR/root/usr/bin/shai-health" \
     "$TEST_DIR/root/usr/bin/shai-aia" \
     "$TEST_DIR/root/usr/bin/shai-aia-server" \
+    "$TEST_DIR/root/usr/lib/shai-installer/shai-context" \
+    "$TEST_DIR/root/usr/lib/shai-installer/shai-context-gateway" \
     "$TEST_DIR/root/usr/bin/shai-wave-a-shell" \
     "$TEST_DIR/root/usr/lib/shai-installer/shai-launcher-sync" \
     "$TEST_DIR/root/usr/lib/shai-installer/shai-plan-validator" \

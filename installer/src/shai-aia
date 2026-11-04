@@ -15,6 +15,7 @@ import shlex
 import shutil
 import socket
 import subprocess
+import sys
 import ssl
 import threading
 import time
@@ -38,13 +39,18 @@ DATA_DIR = Path.home() / ".local/share/shai/models"
 CONFIG_FILE = Path.home() / ".config/shai/aia.json"
 LOG_DIR = STATE_DIR / "logs"
 RESERVE_MB = 1024
-SERVER_URL = "http://127.0.0.1:11435"
+SERVER_URL = "http://127.0.0.1:11437"
+LOCAL_HTTP = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+CONTEXT_HELPER = Path('/usr/lib/shai-installer/shai-context')
+CONTEXT_GATEWAY = 'shai-context-gateway.service'
+MEMORY_DIR = Path.home() / '.local/share/shai/memory'
 SERVER_KEY = STATE_DIR / "server-api-key"
 SERVER_SERVICE = "shai-aia-model.service"
 BROKER_URL = "http://127.0.0.1:11500/v1"
 AI_SHARE = 0.20
 VOICE_ROOT = Path.home() / ".local/share/shai/voice"
 VOICE_HELPER = Path("/usr/lib/shai-installer/shai-voice-manage")
+EXIFTOOL_GUIDE = Path('/usr/share/shai/integrations/exiftool')
 VOICE_OPTIONS = (
     {"id": "espeak", "name": "eSpeak NG", "description": "Small offline speech synthesizer", "commands": ("espeak-ng",), "packages": ("espeak-ng",), "ram_mb": 32},
     {"id": "piper", "name": "Piper", "description": "Local neural text-to-speech; voice files are separate", "commands": ("piper",), "packages": ("piper-tts",), "ram_mb": 256},
@@ -338,6 +344,37 @@ def model_path(model: dict[str, object]) -> Path:
     return DATA_DIR / str(model["file"])
 
 
+def exiftool_context() -> str:
+    """Bounded reference, not filesystem authority or an execution instruction."""
+    manifest = EXIFTOOL_GUIDE / 'commands.json'
+    available = False
+    recipes = []
+    try:
+        if manifest.stat().st_size <= 16384:
+            data = json.loads(manifest.read_text(encoding='utf-8'))
+            available = isinstance(data, dict) and data.get('schema') == 1 and data.get('integration') == 'exiftool'
+            if available and isinstance(data.get('recipes'), dict):
+                allowed = {'/usr/bin/exiftool', '-json', '-G1', '-r', '-all=', '--', '{target}'}
+                for name in ('inspect_file', 'inspect_folder_recursive', 'remove_file_metadata', 'remove_folder_metadata_recursive'):
+                    recipe = data['recipes'].get(name, {})
+                    argv = recipe.get('argv', []) if isinstance(recipe, dict) else []
+                    if (isinstance(argv, list) and argv and argv[0] == '/usr/bin/exiftool'
+                            and all(isinstance(item, str) and item in allowed for item in argv)):
+                        recipes.append(f'{name}: {shlex.join(argv)}')
+    except (OSError, ValueError):
+        pass
+    return (
+        f"Local ExifTool reference: {EXIFTOOL_GUIDE / 'README.md'}; recipes: {manifest} "
+        f"({'available' if available else 'not found or invalid'}). "
+        f"CLI installed: {bool(shutil.which('exiftool'))}; GUI: shai-metadata. "
+        "Metadata cleaning is not file deletion. The GUI supports files/folders recursively, "
+        "previews changes, requires approval, and retains _original backups that still contain metadata. "
+        "Chat currently cannot execute metadata writes. Offer the Metadata cleaner action; "
+        "never claim to have cleaned files or suggest researching a tool that is already documented locally. "
+        + 'Reference recipes only, not execution permission: ' + '; '.join(recipes)
+    )
+
+
 def installed_catalog_models() -> list[dict[str, object]]:
     return [model for model in MODELS if model_path(model).is_file()]
 
@@ -363,6 +400,7 @@ class AIAWindow(Gtk.ApplicationWindow):
         self.chat_messages: list[tuple[str, str]] = []
         self.last_installed = {str(item["id"]) for item in installed_catalog_models()}
         self.busy = False
+        self.model_chooser: Gtk.FileChooserNative | None = None
         self.ensure_model_service()
 
         root = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
@@ -381,12 +419,15 @@ class AIAWindow(Gtk.ApplicationWindow):
             page = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12)
             page.add_css_class("content")
             page.set_hexpand(True)
-            scroll = Gtk.ScrolledWindow()
-            scroll.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
-            scroll.set_propagate_natural_width(False)
-            scroll.set_child(page)
             self.pages[name] = page
-            self.stack.add_named(scroll, name)
+            if name == 'Chat':
+                self.stack.add_named(page, name)
+            else:
+                scroll = Gtk.ScrolledWindow()
+                scroll.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+                scroll.set_propagate_natural_width(False)
+                scroll.set_child(page)
+                self.stack.add_named(scroll, name)
 
         self.show_tab("Chat")
         GLib.timeout_add_seconds(3, self.scan_timer)
@@ -461,11 +502,21 @@ class AIAWindow(Gtk.ApplicationWindow):
         return model_path(active)
 
     def ensure_model_service(self, restart: bool = False) -> None:
+        ensure_server_key()
+        code, output = run([sys.executable, str(CONTEXT_HELPER), '--refresh'], timeout=15)
+        if code:
+            audit('context-unavailable', output[:300])
+            self.config['last_model_error'] = 'Shared local memory unavailable; repair the SHAI context helper or its permissions.'
+        else:
+            run(['systemctl', '--user', 'daemon-reload'], timeout=8)
+            code, _output = run(['systemctl', '--user', 'enable', '--now', 'shai-context.timer', CONTEXT_GATEWAY], timeout=8)
+            if code:
+                self.config['last_model_error'] = 'Shared memory gateway could not start. Inspect shai-context-gateway.service in the user journal.'
+                audit('context-gateway-error', 'User service failed to start; no credentials logged')
         active_path = self.active_path()
         if not active_path or not shutil.which("llama-server"):
             run(["systemctl", "--user", "disable", "--now", SERVER_SERVICE], timeout=8)
             return
-        ensure_server_key()
         run(["systemctl", "--user", "daemon-reload"], timeout=8)
         run(["systemctl", "--user", "enable", SERVER_SERVICE], timeout=8)
         action = "restart" if restart else "start"
@@ -482,7 +533,7 @@ class AIAWindow(Gtk.ApplicationWindow):
             headers={"Authorization": f"Bearer {ensure_server_key()}"},
         )
         try:
-            with urllib.request.urlopen(request, timeout=2) as response:
+            with LOCAL_HTTP.open(request, timeout=2) as response:
                 return response.status == 200
         except (OSError, urllib.error.URLError):
             return False
@@ -542,6 +593,7 @@ class AIAWindow(Gtk.ApplicationWindow):
             f"Home Assistant integration status is {ha_status}. "
             "AIA can guide Home Assistant setup through its Integrations tab but cannot control devices without approval. "
             "If a fact is not supplied here or by the user, say you do not know."
+            + ' ' + exiftool_context()
         )
 
     def request_completion(self, messages: list[dict[str, str]], max_tokens: int = 256) -> str:
@@ -561,7 +613,7 @@ class AIAWindow(Gtk.ApplicationWindow):
             headers={"Authorization": f"Bearer {ensure_server_key()}", "Content-Type": "application/json"},
             method="POST",
         )
-        with urllib.request.urlopen(request, timeout=180) as response:
+        with LOCAL_HTTP.open(request, timeout=180) as response:
             result = json.loads(response.read().decode("utf-8"))
         try:
             answer = result["choices"][0]["message"]["content"]
@@ -617,6 +669,7 @@ class AIAWindow(Gtk.ApplicationWindow):
         actions = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
         for title, callback in (("Choose model", lambda *_: self.show_tab("Models")),
                                 ("Control Center", lambda *_: self.show_tab("Control Center")),
+                                ("Metadata cleaner", lambda *_: self.launch_command(['shai-metadata'])),
                                 ("Open WebUI", self.open_webui)):
             button = Gtk.Button(label=title)
             button.connect("clicked", callback)
@@ -632,11 +685,14 @@ class AIAWindow(Gtk.ApplicationWindow):
         self.chat_view.set_wrap_mode(Gtk.WrapMode.WORD_CHAR)
         self.chat_view.set_monospace(False)
         chat_scroll = Gtk.ScrolledWindow()
+        self.chat_scroll = chat_scroll
         chat_scroll.add_css_class("chat")
         chat_scroll.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
-        chat_scroll.set_min_content_height(360)
+        chat_scroll.set_min_content_height(100)
+        chat_scroll.set_propagate_natural_height(False)
         chat_scroll.set_vexpand(True)
         chat_scroll.set_child(self.chat_view)
+        chat_scroll.get_vadjustment().connect('changed', self.scroll_chat_to_bottom)
         box.append(chat_scroll)
         self.render_chat()
 
@@ -664,6 +720,13 @@ class AIAWindow(Gtk.ApplicationWindow):
         else:
             text = "\n\n".join(f"{role}: {message}" for role, message in self.chat_messages)
         self.chat_view.get_buffer().set_text(text)
+        GLib.idle_add(self.scroll_chat_to_bottom)
+
+    def scroll_chat_to_bottom(self, *_args: object) -> bool:
+        if hasattr(self, 'chat_scroll'):
+            adjustment = self.chat_scroll.get_vadjustment()
+            adjustment.set_value(max(adjustment.get_lower(), adjustment.get_upper() - adjustment.get_page_size()))
+        return False
 
     def send_chat(self, _widget: Gtk.Widget) -> None:
         if self.busy:
@@ -848,6 +911,14 @@ class AIAWindow(Gtk.ApplicationWindow):
         )
         service_state, service_detail = self.service_status()
         box.append(label(f"Model service: {service_detail}", "good" if service_state == "ready" else "warning" if service_state == "starting" else "critical"))
+        self.install_policy_notice(box)
+        if not shutil.which('llama-server'):
+            box.append(label('Inference runtime is not installed. Local GGUF import is available, but chat requires llama.cpp.', 'warning'))
+            runtime = Gtk.Button(label='Install from online' if self.config.get('online_installs') else 'Enable online from Settings')
+            runtime.set_sensitive(bool(self.config.get('online_installs')))
+            runtime.set_tooltip_text('Enable approved online installs in Settings first' if not self.config.get('online_installs') else 'Installs llama.cpp only after confirmation; no model download')
+            runtime.connect('clicked', self.confirm_runtime_install)
+            box.append(runtime)
         webui = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
         webui.add_css_class("panel")
         webui_copy = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
@@ -902,7 +973,7 @@ class AIAWindow(Gtk.ApplicationWindow):
                 remove.connect("clicked", lambda _b, item=model: self.confirm_remove(item))
                 actions.append(remove)
             else:
-                install = Gtk.Button(label="Install from online source")
+                install = Gtk.Button(label="Install from online" if self.config.get('online_installs') else 'Enable online from Settings')
                 install.set_sensitive(bool(self.config.get("online_installs")) and fits)
                 install.set_tooltip_text("Enable approved online installs in Settings" if not self.config.get("online_installs") else reason)
                 install.connect("clicked", lambda _b, item=model: self.confirm_install(item))
@@ -1050,7 +1121,87 @@ class AIAWindow(Gtk.ApplicationWindow):
         self.update_active_header()
         self.build_models()
 
+    def install_policy_notice(self, box: Gtk.Box) -> None:
+        if self.config.get('online_installs'):
+            return
+        row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        detail = label('Downloads are paused. Enable online installs in Settings. Chat-history saving is optional and unrelated.', 'warning')
+        detail.set_hexpand(True)
+        row.append(detail)
+        settings = Gtk.Button(label='Open install settings')
+        settings.connect('clicked', lambda *_: self.show_tab('Settings'))
+        row.append(settings)
+        box.append(row)
+
+    def model_readiness_script(self) -> str:
+        return textwrap.dedent(f"""\
+python3 - {shlex.quote(str(SERVER_KEY))} <<'AIA_HEALTH'
+import json, pathlib, sys, time, urllib.request, urllib.error
+key = pathlib.Path(sys.argv[1]).read_text().strip()
+opener = urllib.request.build_opener(urllib.request.ProxyHandler({{}}))
+for attempt in range(80):
+    request = urllib.request.Request('{SERVER_URL}/health', headers={{'Authorization': 'Bearer ' + key}})
+    try:
+        with opener.open(request, timeout=2) as response:
+            if response.status == 200:
+                break
+    except OSError:
+        pass
+    time.sleep(0.5)
+else:
+    raise SystemExit('Model API did not become ready. Review: journalctl --user -u {SERVER_SERVICE} -n 30')
+payload = json.dumps({{'model': 'local', 'messages': [{{'role': 'user', 'content': 'Say OK'}}], 'max_tokens': 1}}).encode()
+probe = urllib.request.Request('{SERVER_URL}/v1/chat/completions', data=payload,
+                               headers={{'Authorization': 'Bearer ' + key, 'Content-Type': 'application/json'}})
+with opener.open(probe, timeout=30) as response:
+    result = json.load(response)
+    if not isinstance(result, dict) or not isinstance(result.get('choices'), list) or not result['choices']:
+        raise SystemExit('The local inference API returned an invalid response.')
+print('Authenticated local inference API is ready.')
+AIA_HEALTH
+""")
+
+    def confirm_runtime_install(self, _button: Gtk.Button) -> None:
+        if not self.config.get('online_installs'):
+            self.error('Enable approved online installs in Settings first. Chat history can stay off.')
+            return
+        dialog = Gtk.MessageDialog(transient_for=self, modal=True, buttons=Gtk.ButtonsType.OK_CANCEL,
+                                  text='Install the inference runtime?',
+                                  secondary_text='ONLINE: install Ubuntu llama.cpp in a visible terminal after approval. No model weights are downloaded.')
+        def confirmed(window: Gtk.Dialog, response: int) -> None:
+            window.destroy()
+            if response != Gtk.ResponseType.OK:
+                return
+            if not self.config.get('online_installs'):
+                self.error('Online installation was disabled. Nothing was downloaded.')
+                return
+            STATE_DIR.mkdir(parents=True, exist_ok=True, mode=0o700)
+            script = STATE_DIR / f'approved-runtime-install-{secrets.token_hex(8)}.sh'
+            script.write_text('#!/usr/bin/env bash\nset -Eeuo pipefail\n'
+                              'trap \'read -r -p "Runtime install failed; review the error and press Enter to close."\' ERR\n'
+                              'sudo apt-get --no-remove install -y llama.cpp ca-certificates\n'
+                              'python3 /usr/bin/shai-aia-server --prepare-key\n'
+                              f'python3 {CONTEXT_HELPER} --refresh\n'
+                              f'systemctl --user daemon-reload\nsystemctl --user enable --now shai-context.timer {CONTEXT_GATEWAY}\n'
+                              f"if python3 -c 'import json,sys; from pathlib import Path; p=Path(sys.argv[1]); sys.exit(0 if p.exists() and json.loads(p.read_text()).get(\"active_model\") else 1)' {shlex.quote(str(CONFIG_FILE))}; then\n"
+                              f'systemctl --user daemon-reload\nsystemctl --user enable {SERVER_SERVICE}\nsystemctl --user restart {SERVER_SERVICE}\n'
+                              + self.model_readiness_script() + 'fi\n'
+                              'echo "Runtime installed. Choose a default model in AIA to start inference."\n'
+                              'read -r -p "Press Enter to close."\n', encoding='utf-8')
+            script.chmod(0o700)
+            self.launch_terminal(script)
+        dialog.connect('response', confirmed)
+        dialog.present()
+
     def confirm_install(self, model: dict[str, object]) -> None:
+        if not self.config.get('online_installs'):
+            self.error('Online installs are paused. Enable Allow approved online installs in Settings, then approve this download.')
+            return
+        self.hw = hardware()
+        fits, reason = self.fit(model)
+        if not fits:
+            self.error(reason)
+            return
         dialog = Gtk.MessageDialog(
             transient_for=self,
             modal=True,
@@ -1071,22 +1222,34 @@ class AIAWindow(Gtk.ApplicationWindow):
         dialog.destroy()
         if response != Gtk.ResponseType.OK:
             return
+        if not self.config.get('online_installs'):
+            self.error('Online installation was disabled. Nothing was downloaded.')
+            return
+        self.hw = hardware()
+        fits, reason = self.fit(model)
+        if not fits:
+            self.error(reason)
+            return
         STATE_DIR.mkdir(parents=True, exist_ok=True, mode=0o700)
         DATA_DIR.mkdir(parents=True, exist_ok=True, mode=0o700)
+        if not CONFIG_FILE.exists():
+            save_config(self.config)
         destination = model_path(model)
-        script = STATE_DIR / "approved-model-install.sh"
+        script = STATE_DIR / f'approved-model-install-{secrets.token_hex(8)}.sh'
         body = textwrap.dedent(f"""\
 #!/usr/bin/env bash
 set -Eeuo pipefail
 trap 'printf "\\nInstallation failed on line %s. Review the error above.\\n" "$LINENO"; read -r -p "Press Enter to close..."' ERR
 printf '%s\\n' 'AIA approved online model installation' 'Source: {model['url']}' 'Destination: {destination}'
-sudo apt-get install -y llama.cpp wget ca-certificates
+sudo apt-get --no-remove install -y llama.cpp wget ca-certificates
 install -d -m 0700 {shlex.quote(str(DATA_DIR))}
 wget -4 --https-only --continue --output-document={shlex.quote(str(destination) + '.part')} {shlex.quote(str(model['url']))}
 test "$(stat --format=%s {shlex.quote(str(destination) + '.part')})" -eq {int(model['bytes'])}
 printf '%s  %s\\n' '{model['sha256']}' {shlex.quote(str(destination) + '.part')} | sha256sum --check --status
 mv -- {shlex.quote(str(destination) + '.part')} {shlex.quote(str(destination))}
 printf '%s  %s\\n' '{model['sha256']}' {shlex.quote(str(destination))} > {shlex.quote(str(destination) + '.sha256')}
+python3 /usr/bin/shai-aia-server --prepare-key
+python3 {CONTEXT_HELPER} --refresh
 python3 - {shlex.quote(str(CONFIG_FILE))} {shlex.quote(str(model['id']))} <<'PY'
 import json
 import os
@@ -1103,9 +1266,11 @@ temporary.chmod(0o600)
 os.replace(temporary, path)
 PY
 systemctl --user daemon-reload
+systemctl --user enable --now shai-context.timer {CONTEXT_GATEWAY}
 systemctl --user enable --now {SERVER_SERVICE}
 systemctl --user restart {SERVER_SERVICE}
 systemctl --user is-active --quiet {SERVER_SERVICE}
+{self.model_readiness_script()}
 printf '%s\\n' 'Installation complete. Checksum verified, model activated, and local model service restarted.' 'This window will close in five seconds.'
 sleep 5
 """)
@@ -1116,9 +1281,11 @@ sleep 5
 
     def launch_terminal(self, script: Path) -> None:
         if shutil.which("ptyxis"):
-            self.launch_command(["ptyxis", "--", "bash", str(script)])
+            self.launch_command(["ptyxis", "--standalone", "--title", "AIA - Approved action", "--", "bash", str(script)])
         elif shutil.which("gnome-terminal"):
             self.launch_command(["gnome-terminal", "--", "bash", str(script)])
+        elif shutil.which('x-terminal-emulator'):
+            self.launch_command(['x-terminal-emulator', '-e', 'bash', str(script)])
         else:
             self.error("No supported graphical terminal is installed.")
 
@@ -1158,6 +1325,9 @@ sleep 5
         self.build_models()
 
     def import_model(self, _button: Gtk.Button) -> None:
+        if self.model_chooser is not None:
+            self.model_chooser.show()
+            return
         chooser = Gtk.FileChooserNative.new(
             "Import local GGUF model", self, Gtk.FileChooserAction.OPEN, "Import", "Cancel"
         )
@@ -1166,38 +1336,47 @@ sleep 5
         file_filter.add_pattern("*.gguf")
         chooser.add_filter(file_filter)
         chooser.connect("response", self.import_response)
+        self.model_chooser = chooser
         chooser.show()
 
     def import_response(self, chooser: Gtk.FileChooserNative, response: int) -> None:
-        if response == Gtk.ResponseType.ACCEPT:
-            selected = chooser.get_file().get_path()
-            if selected:
-                source = Path(selected)
-                try:
-                    with source.open("rb") as stream:
-                        if stream.read(4) != b"GGUF":
-                            raise ValueError("This is not a GGUF model file.")
-                except (OSError, ValueError) as exc:
-                    self.error(str(exc))
-                    chooser.destroy()
-                    return
-                item = {
-                    "id": "imported-" + hashlib.sha256(str(source.resolve()).encode()).hexdigest()[:16],
-                    "name": source.stem,
-                    "path": str(source.resolve()),
-                    "publisher": "User-provided",
-                    "license": "Not recorded",
-                }
-                imported = [entry for entry in self.config.get("imported_models", []) if isinstance(entry, dict) and entry.get("id") != item["id"]]
-                imported.append(item)
-                self.config["imported_models"] = imported
-                self.config["active_model"] = item["id"]
-                save_config(self.config)
-                self.ensure_model_service(restart=True)
-                audit("model-imported", str(source.resolve()))
-                self.update_active_header()
-                self.build_models()
-        chooser.destroy()
+        previous = dict(self.config)
+        saved = False
+        try:
+            if response != Gtk.ResponseType.ACCEPT:
+                return
+            file = chooser.get_file()
+            selected = file.get_path() if file is not None else None
+            if not selected:
+                raise ValueError('Select a local GGUF file. Remote or unavailable locations cannot be imported.')
+            source = Path(selected)
+            with source.open('rb') as stream:
+                if stream.read(4) != b'GGUF':
+                    raise ValueError('This is not a GGUF model file.')
+            item = {
+                'id': 'imported-' + hashlib.sha256(str(source.resolve()).encode()).hexdigest()[:16],
+                'name': source.stem, 'path': str(source.resolve()),
+                'publisher': 'User-provided', 'license': 'Not recorded',
+            }
+            imported = [entry for entry in self.config.get('imported_models', []) if isinstance(entry, dict) and entry.get('id') != item['id']]
+            imported.append(item)
+            self.config['imported_models'] = imported
+            self.config['active_model'] = item['id']
+            save_config(self.config)
+            saved = True
+            self.ensure_model_service(restart=True)
+            audit('model-imported', str(source.resolve()))
+            self.update_active_header()
+            self.build_models()
+            if not shutil.which('llama-server'):
+                self.error('The local model was registered, but inference cannot start because llama.cpp is missing. Install the runtime from Models with separate online approval, or supply it through Ubuntu offline. No download was attempted.')
+        except (OSError, ValueError, TypeError) as exc:
+            if not saved:
+                self.config = previous
+            self.error(f'Local model import: {exc}')
+        finally:
+            self.model_chooser = None
+            chooser.destroy()
 
     def build_hardware(self) -> None:
         box = self.pages["Hardware"]
@@ -1240,6 +1419,8 @@ sleep 5
         box = self.pages["Voice"]
         self.clear(box)
         self.heading(box, "Local voice", "Voice remains off until separately installed and granted microphone access.")
+        self.hw = hardware()
+        self.install_policy_notice(box)
         refresh = Gtk.Button(label="Refresh installed voice tools")
         refresh.connect("clicked", lambda *_: self.build_voice())
         box.append(refresh)
@@ -1257,12 +1438,16 @@ sleep 5
             panel.append(label(f"Estimated runtime RAM: {spec['ram_mb']} MB | Install source: {'Ubuntu APT' if spec['id'] == 'espeak' else 'PyPI (isolated runtime)'}", "muted"))
             panel.append(label("Installed by AIA" if managed else "Detected outside AIA: " + ", ".join(found) if found else "Not installed", "good" if managed or found else "muted"))
             buttons = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
-            action = Gtk.Button(label="Remove" if managed else "Install from online source")
+            action = Gtk.Button(label="Remove" if managed else "Install from online" if self.config.get('online_installs') else 'Enable online from Settings')
             budget = max(0, min(int(self.hw["ram_total_mb"]) // 5, int(self.hw["ram_available_mb"]) - RESERVE_MB))
             fits = int(spec["ram_mb"]) <= budget and int(self.hw["disk_free_mb"]) > 2048
             action.set_sensitive(managed or (not found and fits and bool(self.config.get("online_installs")) and VOICE_HELPER.exists()))
             if not fits and not managed:
                 panel.append(label("Outside the current shared-host memory/storage budget.", "warning"))
+            if found and not managed:
+                panel.append(label('Managed by its original installer; AIA removal is unavailable.', 'muted'))
+            elif not managed and not VOICE_HELPER.exists():
+                panel.append(label('AIA voice helper is missing. Repair the SHAI package.', 'warning'))
             action.set_tooltip_text("External installations are preserved; manage their removal in their original installer." if found and not managed else "Requires approval; executes in a visible terminal.")
             action.connect("clicked", lambda _b, item=spec, remove=managed: self.voice_action(item, remove))
             buttons.append(action)
@@ -1281,12 +1466,18 @@ sleep 5
         box.append(label("Speech-to-Phrase requires its dedicated trained home-automation setup; it is not installed as a generic Python speech engine.", "muted"))
 
     def voice_action(self, spec: dict, remove: bool) -> None:
+        if not remove and not self.config.get('online_installs'):
+            self.error('Online voice installs are paused. Enable approved online installs in Settings first.')
+            return
         dialog = Gtk.MessageDialog(transient_for=self, modal=True, buttons=Gtk.ButtonsType.OK_CANCEL,
                                   text=f"{'Remove' if remove else 'Install'} {spec['name']}?",
                                   secondary_text="This removes only the AIA-managed installation, preserving voice data." if remove else "ONLINE: download from Ubuntu or PyPI in a visible terminal. No microphone, listening service, or model download is enabled automatically.")
         def confirmed(window: Gtk.Dialog, response: int) -> None:
             window.destroy()
             if response != Gtk.ResponseType.OK:
+                return
+            if not remove and not self.config.get('online_installs'):
+                self.error('Online installation was disabled. Nothing was downloaded.')
                 return
             STATE_DIR.mkdir(parents=True, exist_ok=True, mode=0o700)
             script = STATE_DIR / "approved-voice-action.sh"
@@ -1710,11 +1901,20 @@ sleep 5
         box = self.pages["Settings"]
         self.clear(box)
         self.heading(box, "Settings", "AIA defaults to offline operation and stores configuration only for this user.")
+        box.append(label(f'Shared local memory: {MEMORY_DIR}\nAIA and the managed Open WebUI connection use the same sanitized context. Credentials and raw chat/log text are excluded.', 'muted', selectable=True))
+        memory_note = Gtk.Entry(placeholder_text='Non-sensitive fact to remember')
+        box.append(memory_note)
+        remember = Gtk.Button(label='Remember this note')
+        remember.connect('clicked', lambda *_: self.remember_note(memory_note))
+        box.append(remember)
+        open_memory = Gtk.Button(label='Open local memory folder')
+        open_memory.connect('clicked', lambda *_: self.launch_command(['xdg-open', str(MEMORY_DIR)]))
+        box.append(open_memory)
         online_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
         online_copy = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
         online_copy.set_hexpand(True)
         online_copy.append(label("Allow approved online installs", "section"))
-        online_copy.append(label("Enables labelled install buttons. Every download still requires confirmation in AIA and again in a visible terminal.", "muted"))
+        online_copy.append(label("Enables labelled install buttons. Each download requires approval and runs in a visible terminal; Ubuntu may ask for sudo. Chat history can stay off.", "muted"))
         online_row.append(online_copy)
         online = Gtk.Switch()
         online.set_active(bool(self.config.get("online_installs")))
@@ -1754,6 +1954,24 @@ sleep 5
         self.config["online_installs"] = switch.get_active()
         save_config(self.config)
         audit("online-install-policy", "enabled" if switch.get_active() else "disabled")
+
+    def remember_note(self, entry: Gtk.Entry) -> None:
+        text = entry.get_text().strip()
+        if not text:
+            return
+        # An explicit button saves a note, independently of chat-history recording.
+        try:
+            result = subprocess.run([sys.executable, str(CONTEXT_HELPER), '--remember-stdin'], input=text,
+                                    capture_output=True, text=True, timeout=15, check=False)
+        except (OSError, subprocess.TimeoutExpired):
+            self.error('Memory note was not saved. Check the local context helper and memory permissions.')
+            return
+        if result.returncode:
+            output = (result.stderr or result.stdout).strip()
+            self.error('Memory note was not saved: ' + output[-500:])
+            return
+        entry.set_text('')
+        audit('memory-note-saved', 'Explicit local user note; content excluded from activity log')
 
     def history_changed(self, switch: Gtk.Switch, _param: object) -> None:
         self.config["save_chat"] = switch.get_active()

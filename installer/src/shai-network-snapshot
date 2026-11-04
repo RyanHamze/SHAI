@@ -7,6 +7,7 @@ import json
 import os
 import re
 import socket
+import shutil
 import subprocess
 import time
 import urllib.parse
@@ -61,6 +62,9 @@ def purpose(protocol: str, port: int | None, ports: dict) -> tuple[str, str]:
     item = ports.get((protocol, port))
     if item:
         return str(item.get("name", "registered service")), str(item.get("purpose", "SHAI registered service"))
+    if protocol == 'tcp' and port in {11435, 11437}:
+        name = 'AIA model inference' if port == 11435 else 'SHAI shared AI memory gateway'
+        return name, 'Expected loopback SHAI endpoint; verify the owning process, not just the port'
     try:
         return socket.getservbyport(port, protocol), "Standard service-name hint; not proof of payload"
     except OSError:
@@ -207,6 +211,16 @@ def containers() -> tuple[list[dict[str, object]], list[dict[str, object]], dict
     }
 
 
+def firewall_snapshot() -> dict[str, str]:
+    if not shutil.which('ufw'):
+        return {'state': 'not installed', 'detail': 'UFW is not installed; other firewall rules are not assessed'}
+    code, output = run(['ufw', 'status'], 3)
+    first = output.splitlines()[0] if output else ''
+    if code == 0 and first in {'Status: active', 'Status: inactive'}:
+        return {'state': first.split(': ', 1)[1], 'detail': first}
+    return {'state': 'unknown', 'detail': 'UFW status could not be read'}
+
+
 def main() -> int:
     if os.geteuid() != 0:
         raise SystemExit("shai-network-snapshot must run as the system service")
@@ -229,6 +243,7 @@ def main() -> int:
         "container_events": events,
         "observer": observer,
         "connections": connections,
+        "firewall": firewall_snapshot(),
     }
     OUTPUT.parent.mkdir(parents=True, exist_ok=True, mode=0o755)
     temporary = OUTPUT.with_suffix(".tmp")

@@ -165,7 +165,8 @@ def aia_credentials() -> tuple[str, str]:
     if not user:
         raise SystemExit("Open WebUI requires SHAPP to run from a desktop user's visible sudo terminal")
     try:
-        home = Path(pwd.getpwnam(user).pw_dir)
+        account = pwd.getpwnam(user)
+        home = Path(account.pw_dir)
     except KeyError as exc:
         raise SystemExit(f"Open WebUI desktop user does not exist: {user}") from exc
     config_path = home / ".config/shai/aia.json"
@@ -177,6 +178,13 @@ def aia_credentials() -> tuple[str, str]:
         raise SystemExit("Open AIA, choose an active local model, and wait for its model service before installing Open WebUI") from exc
     if not active or not api_key:
         raise SystemExit("Open AIA, choose an active local model, and wait for its model service before installing Open WebUI")
+    # This context service runs with the desktop user's permissions, never root.
+    environment = ['runuser', '-u', user, '--', 'env', f'HOME={home}',
+                   f'XDG_RUNTIME_DIR=/run/user/{account.pw_uid}',
+                   f'DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/{account.pw_uid}/bus']
+    run([*environment, 'python3', '/usr/lib/shai-installer/shai-context', '--refresh'])
+    run([*environment, 'systemctl', '--user', 'daemon-reload'])
+    run([*environment, 'systemctl', '--user', 'enable', '--now', 'shai-context.timer', 'shai-context-gateway.service'])
     secret_path = SECRETS / "open-webui-secret"
     if secret_path.exists():
         webui_secret = secret_path.read_text(encoding="utf-8").strip()
@@ -272,10 +280,10 @@ def compose_text(
             "    cap_drop: [ALL]", "    environment:",
             "      HOST: 127.0.0.1", "      PORT: '3000'", "      WEBUI_AUTH: 'true'",
             "      ENABLE_SIGNUP: 'true'", "      ENABLE_OLLAMA_API: 'false'",
-            "      ENABLE_OPENAI_API: 'true'", "      OPENAI_API_BASE_URL: http://127.0.0.1:11435/v1",
+            "      ENABLE_OPENAI_API: 'true'", "      OPENAI_API_BASE_URL: http://127.0.0.1:11437/v1",
             "      OPENAI_API_KEY: ${AIA_API_KEY}", "      WEBUI_SECRET_KEY: ${OPEN_WEBUI_SECRET}",
             "      ENABLE_PERSISTENT_CONFIG: 'false'", "      ENABLE_TOOL_SERVERS: 'true'",
-            "      TOOL_SERVER_CONNECTIONS: '[{\"type\":\"openapi\",\"url\":\"http://127.0.0.1:11500\",\"spec_type\":\"url\",\"spec\":\"\",\"path\":\"openapi.json\",\"auth_type\":\"bearer\",\"key\":\"${SHAI_CONTROL_TOKEN}\",\"config\":{\"enable\":true},\"info\":{\"id\":\"shai-local-control\",\"name\":\"SHAI Local Control\",\"description\":\"Read SHAI inventory and create approval-required proposals.\"}}]'",
+            "      TOOL_SERVER_CONNECTIONS: '[{\"type\":\"openapi\",\"url\":\"http://127.0.0.1:11500\",\"spec_type\":\"url\",\"spec\":\"\",\"path\":\"openapi.json\",\"auth_type\":\"bearer\",\"key\":\"${SHAI_CONTROL_TOKEN}\",\"config\":{\"enable\":true},\"info\":{\"id\":\"shai-local-control\",\"name\":\"SHAI Local Control\",\"description\":\"Read SHAI inventory and create approval-required proposals.\"}},{\"type\":\"openapi\",\"url\":\"http://127.0.0.1:11437\",\"spec_type\":\"url\",\"spec\":\"\",\"path\":\"openapi.json\",\"auth_type\":\"bearer\",\"key\":\"${AIA_API_KEY}\",\"config\":{\"enable\":true},\"info\":{\"id\":\"shai-local-memory\",\"name\":\"SHAI Local Memory\",\"description\":\"Read shared AIA, SHEALTH, SHAPP and local memory context.\"}}]'",
             "      SHAI_CONTROL_URL: http://127.0.0.1:11500/v1",
             "      SHAI_CONTROL_TOKEN: ${SHAI_CONTROL_TOKEN}",
             "      OFFLINE_MODE: 'true'", "      HF_HUB_OFFLINE: '1'",

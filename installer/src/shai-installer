@@ -421,7 +421,7 @@ if "org.gnome.Nautilus.desktop" not in items:
     items.insert(0, "org.gnome.Nautilus.desktop")
 if "org.gnome.Ptyxis.desktop" not in items:
     items.append("org.gnome.Ptyxis.desktop")
-for desktop_id in ("shai-shapp.desktop", "com.aabey.shai.AIA.desktop"):
+for desktop_id in ("com.aabey.shai.Shapp.desktop", "com.aabey.shai.AIA.desktop"):
     if pathlib.Path("/usr/share/applications", desktop_id).exists() and desktop_id not in items:
         items.append(desktop_id)
 print("[" + ", ".join(repr(item) for item in items) + "]")
@@ -550,7 +550,9 @@ PY
 
 install_desktop_launcher() {
     local launcher="$1" desktop_dir="$TARGET_HOME/Desktop"
-    install -m 0644 "$LIB_DIR/assets/launchers/$launcher" "/usr/share/applications/$launcher"
+    local menu_launcher="$launcher"
+    [[ "$launcher" != shai-shapp.desktop ]] || menu_launcher=com.aabey.shai.Shapp.desktop
+    install -m 0644 "$LIB_DIR/assets/launchers/$launcher" "/usr/share/applications/$menu_launcher"
     if [[ "$launcher" == shai-health.desktop ]]; then
         install -m 0644 "$LIB_DIR/assets/launchers/$launcher" \
             /usr/share/applications/com.aabey.shai.Health.desktop
@@ -623,8 +625,16 @@ health_check() {
 }
 
 clear_expected_removed_unit_failures() {
+    local unit
     if ! dpkg-query -W -f='${db:Status-Abbrev}' apport 2>/dev/null | grep -q '^ii'; then
         systemctl reset-failed apport.service 2>/dev/null || true
+    fi
+    if ! dpkg-query -W -f='${db:Status-Abbrev}' ubuntu-insights 2>/dev/null | grep -q '^ii'; then
+        for unit in ubuntu-insights-collect.timer ubuntu-insights-upload.timer; do
+            if ! run_as_user systemctl --user cat "$unit" >/dev/null 2>&1; then
+                run_as_user systemctl --user reset-failed "$unit" 2>/dev/null || true
+            fi
+        done
     fi
 }
 
@@ -716,6 +726,9 @@ health_check
 "$LIB_DIR/shai-system-summary" "$TARGET_USER" "$STATE_DIR"
 dpkg-query -W -f='${binary:Package}\t${Version}\n' > "$RUN_DIR/packages-after.tsv"
 "$LIB_DIR/collect-debloat-benchmark" installer-after > "$RUN_DIR/benchmark-after.md"
+run_as_user python3 "$LIB_DIR/shai-context" --refresh
+run_as_user systemctl --user daemon-reload
+run_as_user systemctl --user enable --now shai-context.timer
 printf '%s\n' "$SHAI_VERSION" > "$STATE_DIR/applied-version"
 printf '%s\n' "$STAMP" > "$STATE_DIR/latest-run"
 write_setup_result success "SHAI Setup passed all final health checks."

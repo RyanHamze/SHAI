@@ -1,0 +1,112 @@
+#!/bin/bash
+set -u
+
+case "${1:-}" in
+    remove|deconfigure) ;;
+    *) exit 0 ;;
+esac
+
+managed_model_limits() {
+    local dropins=$1 contents line path leaf saw_runtime=0
+    local -a paths
+    shift
+    [[ "$unit" == shai-aia-model.service && "$scope" == user ]] || return 1
+    IFS=' ' read -r -a paths <<< "$dropins"
+    for path in "${paths[@]}"; do
+        [[ "${path%/*}" == "/run/user/$uid/systemd/user.control/$unit.d" ]] || return 1
+        leaf=${path##*/}
+        [[ "$leaf" =~ ^50-(CPUQuota|CPUQuotaPerSecUSec|MemoryHigh|MemoryHighScale|MemoryMax|MemoryMaxScale)\.conf$ ]] || return 1
+    done
+
+    # AIA uses set-property --runtime for these limits. Read through systemctl
+    # as the user, not through root filesystem traversal of user-owned paths.
+    contents=$("$@" cat --no-pager -- "$unit" 2>/dev/null) || return 1
+    while IFS= read -r line; do
+        for path in "${paths[@]}"; do
+            [[ "$line" != "# $path" ]] || saw_runtime=1
+        done
+        (( saw_runtime == 1 )) || continue
+        line="${line#"${line%%[![:space:]]*}"}"
+        case "$line" in
+            ''|\#*|\;*|'[Service]'|CPUQuota=*|MemoryHigh=*|MemoryMax=*|MemoryHighScale=*|MemoryMaxScale=*) ;;
+            *) return 1 ;;
+        esac
+        # A continuation could turn an otherwise harmless comment or value
+        # into a directive on the following line; generated limits never use it.
+        [[ "$line" != *\\ ]] || return 1
+    done <<< "$contents"
+    (( saw_runtime == 1 ))
+}
+
+cleanup_unit() {
+    local scope=$1 unit=$2 properties key value fragment='' dropins='' owner
+    local saw_fragment=0 saw_dropins=0
+    shift 2
+
+    properties=$("$@" show --property=FragmentPath --property=DropInPaths -- "$unit" 2>/dev/null) || return 0
+    while IFS='=' read -r key value; do
+        case "$key" in
+            FragmentPath)
+                (( saw_fragment == 0 )) || return 0
+                fragment=$value
+                saw_fragment=1
+                ;;
+            DropInPaths)
+                (( saw_dropins == 0 )) || return 0
+                dropins=$value
+                saw_dropins=1
+                ;;
+            *) return 0 ;;
+        esac
+    done <<< "$properties"
+    (( saw_fragment == 1 && saw_dropins == 1 )) || return 0
+    # A same-named personal unit is not ours to stop.
+    case "$fragment" in
+        "/usr/lib/systemd/$scope/$unit") ;;
+        "/lib/systemd/$scope/$unit") fragment="/usr$fragment" ;;
+        *) return 0 ;;
+    esac
+    owner=$(dpkg-query --search -- "$fragment" 2>/dev/null) || return 0
+    case "$owner" in
+        "shai-installer: $fragment"|"shai-installer:amd64: $fragment") ;;
+        *) return 0 ;;
+    esac
+    [[ -z "$dropins" ]] || managed_model_limits "$dropins" "$@" || return 0
+
+    "$@" stop -- "$unit" >/dev/null 2>&1 ||
+        printf 'shai-installer: could not stop %s (%s); continuing removal\n' "$unit" "$scope" >&2
+    "$@" disable -- "$unit" >/dev/null 2>&1 ||
+        printf 'shai-installer: could not disable %s (%s); continuing removal\n' "$unit" "$scope" >&2
+    return 0
+}
+
+for unit in shai-network-snapshot.timer shai-network-snapshot.service shai-control-broker.service; do
+    cleanup_unit system "$unit" systemctl
+done
+
+# Only connect to existing managers; never start a session or inspect home files.
+users=$(loginctl list-users --no-legend --no-pager 2>/dev/null) || exit 0
+declare -A seen=()
+while read -r uid username _; do
+    [[ "$uid" =~ ^(0|[1-9][0-9]{0,9})$ ]] || continue
+    (( uid <= 4294967294 )) || continue
+    [[ "$username" =~ ^[a-zA-Z_][a-zA-Z0-9_.-]*\$?$ ]] || continue
+    [[ -z "${seen[$uid]:-}" ]] || continue
+
+    account=$(getent passwd "$uid" 2>/dev/null) || continue
+    [[ "$account" != *$'\n'* ]] || continue
+    IFS=: read -r name _password account_uid _gid _gecos home _shell extra <<< "$account"
+    [[ "$name" == "$username" && "$account_uid" == "$uid" && "$home" == /* && -z "$extra" ]] || continue
+    active=$(systemctl show --property=ActiveState --value -- "user@$uid.service" 2>/dev/null) || continue
+    [[ "$active" == active ]] || continue
+    seen[$uid]=1
+
+    for unit in shai-context.timer shai-context.service shai-context-gateway.service shai-aia-model.service; do
+        cleanup_unit user "$unit" runuser -u "$name" -- env -i \
+            PATH=/usr/sbin:/usr/bin:/sbin:/bin HOME="$home" USER="$name" LOGNAME="$name" \
+            XDG_RUNTIME_DIR="/run/user/$uid" DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/$uid/bus" \
+            systemctl --user
+    done
+done <<< "$users"
+
+exit 0

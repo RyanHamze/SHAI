@@ -327,6 +327,7 @@ def resource_text(name: str, used_mb: int, total_mb: int) -> str:
 class ShappWindow(Gtk.ApplicationWindow):
     def __init__(self, app: Gtk.Application) -> None:
         super().__init__(application=app, title="SHAPP - SHAI App Manager")
+        self.set_icon_name('shai-deploy')
         titlebar = Gtk.HeaderBar()
         titlebar.add_css_class("titlebar")
         titlebar.set_title_widget(Gtk.Label(label="SHAPP - SHAI App Manager"))
@@ -1230,6 +1231,8 @@ class ShappWindow(Gtk.ApplicationWindow):
 
 class ShappApplication(Gtk.Application):
     def __init__(self) -> None:
+        GLib.set_prgname(APP_ID)
+        GLib.set_application_name('SHAPP')
         super().__init__(application_id=APP_ID)
 
     def do_startup(self) -> None:

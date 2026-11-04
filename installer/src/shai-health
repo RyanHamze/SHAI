@@ -379,16 +379,32 @@ def docker_snapshot(details: bool = False) -> dict[str, object]:
             "observer": observer}
 
 
+def firewall_status() -> tuple[str, str]:
+    try:
+        firewall = read_snapshot().get('firewall', {})
+        if isinstance(firewall, dict) and firewall.get('state') in {'active', 'inactive', 'unknown', 'not installed'}:
+            return str(firewall['state']), str(firewall.get('detail', 'Read from the host snapshot'))
+    except (OSError, ValueError, TypeError):
+        pass
+    if not shutil.which('ufw'):
+        return 'not installed', 'UFW is not installed; other firewall rules are not assessed'
+    code, output, _ = run(['ufw', 'status'], 3)
+    first = output.splitlines()[0] if output else ''
+    if code == 0 and first in {'Status: active', 'Status: inactive'}:
+        return first.split(': ', 1)[1], first
+    return 'unknown', 'Status unavailable: host snapshot is missing/stale and UFW requires approval'
+
+
 def host_status() -> dict[str, str]:
     failed_rc, failed, _ = run([
         "systemctl", "--failed", "--no-legend", "--plain",
     ])
-    ufw_rc, ufw, _ = run(["ufw", "status"], 3) if shutil.which("ufw") else (127, "", "")
+    firewall_state, firewall_detail = firewall_status()
     proxy = run(["gsettings", "get", "org.gnome.system.proxy", "mode"], 3)[1]
     reboot = "required" if Path("/var/run/reboot-required").exists() else "not required"
     return {
         "failed_units": "none" if failed_rc == 0 and not failed.strip() else failed.strip() or "unavailable",
-        "firewall": ufw.splitlines()[0] if ufw_rc == 0 and ufw else "status unavailable without approval",
+        "firewall": f"{firewall_state}: {firewall_detail}",
         "connectivity": "web offline" if "manual" in proxy else "web enabled",
         "reboot": reboot,
     }
@@ -920,6 +936,15 @@ class HealthWindow(Gtk.ApplicationWindow):
         self.heading(box, "Uptime", "Host uptime and start state for monitored host services.")
         boot = dt.datetime.now() - dt.timedelta(seconds=float(self.sample["uptime"]))
         box.append(label(f"OS uptime: {duration(float(self.sample['uptime']))}\nLast boot: {boot.astimezone().strftime('%Y-%m-%d %H:%M:%S %Z')}", "panel"))
+        state, detail = firewall_status()
+        firewall_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=12)
+        firewall_row.add_css_class('row')
+        firewall_name = label('Firewall (UFW)', 'section-title', False)
+        firewall_name.set_size_request(180, -1)
+        firewall_row.append(firewall_name)
+        firewall_row.append(label(state, 'healthy' if state == 'active' else 'critical' if state == 'inactive' else 'warning', False))
+        firewall_row.append(label(detail, 'muted'))
+        box.append(firewall_row)
         for service, display_name in (("NetworkManager", "Network Manager"), ("sshd", "Secure Shell"), ("docker", "Container engine")):
             rc, output, _ = run(["systemctl", "show", service, "--property=ActiveState,ActiveEnterTimestamp,SubState", "--no-pager"])
             values = {}

@@ -365,5 +365,17 @@ class StackSafety(Isolated):
                 stack.main()
 
 
+class RemovedUnitMarkers(unittest.TestCase):
+    def test_insights_reset_is_scoped_to_absent_units(self):
+        engine = (ROOT / 'installer/src/shai-installer').read_text()
+        function = engine.split('clear_expected_removed_unit_failures() {', 1)[1].split('\n}\n', 1)[0]
+        program = 'clear_expected_removed_unit_failures() {' + function + '\n}\n'
+        for present in (False, True):
+            mock = "dpkg-query() { return 1; }; systemctl() { :; }; run_as_user() { "
+            mock += '[[ "$*" != *" cat "* ]] || return ' + ('0' if present else '1') + '; printf "%s\\n" "$*"; };\n'
+            result = subprocess.run(['bash', '-c', program + mock + 'clear_expected_removed_unit_failures'], capture_output=True, text=True, check=True)
+            self.assertEqual(result.stdout.count('reset-failed ubuntu-insights-'), 0 if present else 2)
+
+
 if __name__ == '__main__':
     unittest.main()

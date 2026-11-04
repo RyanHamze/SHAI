@@ -23,6 +23,11 @@ python3 tests/test-control-broker.py
 python3 tests/test-voice-manage.py
 python3 tests/test-setup-shapp-audit.py
 python3 tests/test-aia-health-regressions.py
+python3 tests/test-aia-install-controls.py
+python3 tests/test-aia-runtime-startup.py
+python3 tests/test-chat-context.py
+python3 tests/test-shared-memory.py
+python3 tests/test-package-lifecycle.py
 python3 tests/test-ui-wiring.py
 python3 tests/test-update-tasks.py
 python3 tests/test-launcher-sync.py

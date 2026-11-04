@@ -61,5 +61,17 @@ class Launchers(unittest.TestCase):
     def test_web_offline_is_in_trust_allowlist(self):
         self.assertIn('shai-web-connectivity-toggle.desktop', m.LAUNCHERS)
 
+    def test_old_dock_pin_migrates_to_canonical_app_id_once(self):
+        with tempfile.TemporaryDirectory() as folder:
+            home = Path(folder)
+            (home / 'Desktop').mkdir()
+            applications = home / 'applications'
+            applications.mkdir()
+            (applications / 'com.aabey.shai.Shapp.desktop').write_text('[Desktop Entry]\nExec=shai-shapp\n')
+            old = "['shai-shapp.desktop', 'com.aabey.shai.Shapp.desktop', 'org.gnome.Nautilus.desktop']"
+            with patch.object(m.Path, 'home', return_value=home), patch.object(m, 'STATE', home / 'state'), patch.object(m, 'APPLICATIONS', applications), patch.object(m.shutil, 'which', return_value=None), patch.object(m.subprocess, 'run', return_value=SimpleNamespace(returncode=0, stdout=old)) as run:
+                m.sync_user()
+            self.assertEqual(run.call_args.args[0][-1], "['com.aabey.shai.Shapp.desktop', 'org.gnome.Nautilus.desktop']")
+
 if __name__ == '__main__':
     unittest.main()

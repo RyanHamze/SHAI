@@ -6,6 +6,7 @@ from __future__ import annotations
 import json
 import os
 import shutil
+import secrets
 import sys
 from pathlib import Path
 
@@ -23,7 +24,24 @@ CATALOG = {
 
 def fail(message: str) -> None:
     print(f"shai-aia-server: {message}", file=sys.stderr)
-    raise SystemExit(1)
+    raise SystemExit(78)
+
+
+def prepare_key() -> None:
+    """Explicit, unprivileged install step; never print or rotate an existing key."""
+    KEY_FILE.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+    KEY_FILE.parent.chmod(0o700)
+    try:
+        descriptor = os.open(KEY_FILE, os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, 'O_NOFOLLOW', 0), 0o600)
+    except FileExistsError:
+        if KEY_FILE.is_symlink() or not KEY_FILE.is_file():
+            fail('private API key path is not a regular file')
+        if not KEY_FILE.read_text(encoding='utf-8').strip():
+            fail('existing private API key is empty; repair it before starting inference')
+        KEY_FILE.chmod(0o600)
+    else:
+        with os.fdopen(descriptor, 'w', encoding='utf-8') as stream:
+            stream.write(secrets.token_urlsafe(32) + '\n')
 
 
 def load_config() -> dict[str, object]:
@@ -55,11 +73,13 @@ def main() -> None:
     model = active_model(load_config())
     if not model.is_file():
         fail(f"active model does not exist: {model}")
-    if not KEY_FILE.is_file():
+    if KEY_FILE.is_symlink() or not KEY_FILE.is_file():
         fail(f"private API key does not exist: {KEY_FILE}")
     key_mode = KEY_FILE.stat().st_mode & 0o777
     if key_mode & 0o077:
         fail(f"private API key permissions are too broad: {oct(key_mode)}")
+    if not KEY_FILE.read_text(encoding='utf-8').strip():
+        fail('private API key is empty')
 
     threads = max(1, min(4, (os.cpu_count() or 1) // 5))
     arguments = [
@@ -78,4 +98,11 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    if sys.argv[1:] == ['--prepare-key']:
+        if os.geteuid() == 0:
+            fail('prepare the key as the desktop user, without sudo')
+        prepare_key()
+    elif sys.argv[1:]:
+        fail('unknown arguments')
+    else:
+        main()

@@ -55,7 +55,7 @@ class AIARegressions(unittest.TestCase):
                 response.__enter__ = Mock(return_value=response)
                 response.__exit__ = Mock(return_value=False)
                 response.read.return_value = json.dumps(payload).encode()
-                with patch.object(aia, "ensure_server_key", return_value="test-only"), patch.object(aia.urllib.request, "urlopen", return_value=response):
+                with patch.object(aia, "ensure_server_key", return_value="test-only"), patch.object(aia.LOCAL_HTTP, "open", return_value=response):
                     with self.assertRaises(ValueError):
                         aia.AIAWindow.request_completion(object(), [])
 
