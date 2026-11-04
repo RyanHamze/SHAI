@@ -24,6 +24,9 @@ python3 tests/test-voice-manage.py
 python3 tests/test-setup-shapp-audit.py
 python3 tests/test-aia-health-regressions.py
 python3 tests/test-ui-wiring.py
+python3 tests/test-update-tasks.py
+python3 tests/test-launcher-sync.py
+python3 tests/test-setup-policy.py
 [[ "$(dpkg-deb --field "$deb" Architecture)" == amd64 ]]
 [[ "$(dpkg-deb --field "$deb" Package)" == shai-installer ]]
 control_listing="$(dpkg-deb --ctrl-tarfile "$deb" | tar -tf -)"

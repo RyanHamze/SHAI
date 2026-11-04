@@ -29,6 +29,7 @@ APP_ID = "com.aabey.shai.Shapp"
 LIB = Path(os.environ.get("SHAI_INSTALLER_LIB", "/usr/lib/shai-installer"))
 CATALOG = LIB / "catalog/shapp-apps.json"
 STACK_CATALOG = LIB / "catalog/shai-stack-services.json"
+UPDATE_CATALOG = LIB / "catalog/shapp-updates.json"
 PROTECTED = LIB / "PROTECTED_PACKAGES.regex"
 RESULT = Path("/var/lib/shai-installer/shapp-result.json")
 SETUP_CHOICES = Path("/var/lib/shai-installer/setup-choices.json")
@@ -334,6 +335,9 @@ class ShappWindow(Gtk.ApplicationWindow):
         self.set_default_size(1180, 760)
         self.set_size_request(900, 620)
         self.catalog = json.loads(CATALOG.read_text(encoding="utf-8"))["apps"]
+        self.update_catalog = json.loads(UPDATE_CATALOG.read_text(encoding="utf-8"))["tasks"]
+        self.selected_updates: set[str] = set()
+        self.update_checks: dict[str, Gtk.CheckButton] = {}
         self.architecture_mode, self.architecture_source = load_architecture()
         self.architecture_refreshing = False
         self.patterns = protected_patterns()
@@ -420,6 +424,7 @@ class ShappWindow(Gtk.ApplicationWindow):
         self.stack.add_named(installed_scroll, "installed")
         self.rebuild_installed()
         self.stack.add_named(self.build_architecture_view(), "architecture")
+        self.stack.add_named(self.build_updates_view(), "updates")
 
         self.cart = self.build_cart()
         self.cart.set_size_request(CART_WIDTH, -1)
@@ -465,6 +470,7 @@ class ShappWindow(Gtk.ApplicationWindow):
             ("optional", "Optional"),
             ("installed", "Currently installed"),
             ("architecture", "Architecture"),
+            ("updates", "Update All"),
         ):
             button = Gtk.Button(label=title)
             button.add_css_class("tab")
@@ -476,6 +482,53 @@ class ShappWindow(Gtk.ApplicationWindow):
         store.connect("clicked", self.open_ubuntu_store)
         tabs.append(store)
         return tabs
+
+    def build_updates_view(self) -> Gtk.Widget:
+        page = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
+        page.append(text_label("Ubuntu updates and maintenance", "section-title"))
+        page.append(text_label(
+            "Online tasks contact their named sources only after Apply. Automatic updates stay unchanged. "
+            "Update downloads need extra disk space; the app-install totals do not estimate it. "
+            "Firmware may need AC power and a later manual reboot.", "muted"))
+        for task in self.update_catalog:
+            row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=12)
+            row.add_css_class("app-row")
+            check = Gtk.CheckButton()
+            check.set_valign(Gtk.Align.CENTER)
+            check.connect("toggled", self.update_toggled, str(task["id"]))
+            self.update_checks[str(task["id"])] = check
+            row.append(check)
+            copy = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=3)
+            copy.set_hexpand(True)
+            copy.append(text_label(str(task["name"]), "app-name"))
+            copy.append(text_label(str(task["description"]), "app-detail"))
+            copy.append(text_label(str(task["command"]), "app-detail"))
+            copy.append(text_label("Online source" if task["online"] else "Local maintenance", "online"))
+            required = str(task.get("requires", ""))
+            if required and not shutil.which(required):
+                check.set_sensitive(False)
+                row.add_css_class("unavailable")
+                copy.append(text_label(f"Not installed: {required}", "locked"))
+            row.append(copy)
+            page.append(row)
+        scroll = Gtk.ScrolledWindow()
+        scroll.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+        scroll.set_child(page)
+        return scroll
+
+    def update_toggled(self, button: Gtk.CheckButton, task_id: str) -> None:
+        if self.refreshing:
+            return
+        if button.get_active():
+            self.selected_updates.add(task_id)
+        else:
+            self.selected_updates.discard(task_id)
+        self.refresh_cart()
+
+    def remove_update_from_cart(self, _button: Gtk.Button, task_id: str) -> None:
+        self.selected_updates.discard(task_id)
+        self.update_checks[task_id].set_active(False)
+        self.refresh_cart()
 
     def build_architecture_view(self) -> Gtk.Widget:
         page = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10)
@@ -586,10 +639,17 @@ class ShappWindow(Gtk.ApplicationWindow):
         append_log("ARCHITECTURE", "shapp", architecture, "Live setting; SHAPP restart")
         self.update_architecture_state()
         self.show_status("Architecture saved. Restarting SHAPP with the new catalog mode.")
-        subprocess.Popen(
-            ["bash", "-lc", "sleep 0.5; exec /usr/bin/shai-shapp"],
-            start_new_session=True,
-        )
+        command = ["systemd-run", "--user", "--quiet", "--collect",
+                   f"--unit=shai-shapp-{uuid.uuid4().hex}", "--property=Type=exec"]
+        for name in ("DISPLAY", "WAYLAND_DISPLAY", "XAUTHORITY", "XDG_RUNTIME_DIR", "DBUS_SESSION_BUS_ADDRESS", "GSK_RENDERER"):
+            if name in os.environ:
+                command.append(f"--setenv={name}={os.environ[name]}")
+        command.extend(["bash", "-lc", "sleep 0.5; exec /usr/bin/shai-shapp"])
+        try:
+            subprocess.run(command, check=True, capture_output=True, text=True, timeout=10)
+        except (OSError, subprocess.SubprocessError) as exc:
+            self.show_status(f"Architecture saved, but SHAPP could not restart: {exc}. Close and reopen SHAPP.")
+            return
         self.get_application().quit()
 
     def catalog_status(self, item: dict[str, object], available: bool) -> str:
@@ -1006,7 +1066,12 @@ class ShappWindow(Gtk.ApplicationWindow):
                 self.remove_uninstall_from_cart,
                 app,
             ))
-        count = len(installs) + len(removals)
+        updates = getattr(self, "selected_updates", set())
+        for task in getattr(self, "update_catalog", []):
+            if task["id"] in updates:
+                self.cart_items.append(self.pending_row(
+                    f"UPDATE  {task['name']}", "install", self.remove_update_from_cart, task["id"]))
+        count = len(installs) + len(removals) + len(updates)
         if count == 0:
             self.cart_items.append(cart_label("Your software selection matches the current system.", "muted"))
         capacity_ok = self.update_capacity_controls(disk, ram, system_capacity_mb())
@@ -1017,7 +1082,10 @@ class ShappWindow(Gtk.ApplicationWindow):
             self.cart_title.set_tooltip_text("Capacity exceeded; remove a selection")
         else:
             self.cart_title.set_tooltip_text(None)
-        self.apply_button.set_sensitive(count > 0 and capacity_ok and not self.applying)
+        self.apply_button.set_sensitive(count > 0 and (capacity_ok or not installs) and not self.applying)
+        for task in getattr(self, "update_catalog", []):
+            required = str(task.get("requires", ""))
+            self.update_checks[str(task["id"])].set_sensitive(not self.applying and (not required or bool(shutil.which(required))))
 
     def open_ubuntu_store(self, _button: Gtk.Button) -> None:
         manage = shutil.which("snap-store.show-updates")
@@ -1056,15 +1124,16 @@ class ShappWindow(Gtk.ApplicationWindow):
         if self.applying:
             return
         installs, removals = self.changes()
-        if not installs and not removals:
+        updates = getattr(self, "selected_updates", set())
+        if not installs and not removals and not updates:
             return
         disk, ram, _ = self.change_totals(installs, removals)
-        if not self.update_capacity_controls(disk, ram, system_capacity_mb()):
+        if not self.update_capacity_controls(disk, ram, system_capacity_mb()) and installs:
             self.show_status("Capacity exceeded; remove a selection before applying.")
             return
         plan_id = str(uuid.uuid4())
         plan_data = {
-            "schema": 4,
+            "schema": 5,
             "plan_id": plan_id,
             "target_user": os.environ.get("USER", ""),
             "architecture": self.architecture_mode,
@@ -1073,6 +1142,7 @@ class ShappWindow(Gtk.ApplicationWindow):
             "remove_snap": sorted({app.package for app in removals if app.source == "snap"}),
             "remove_container": sorted({app.package for app in removals if app.source == "container"}),
             "remove_managed": sorted({app.package for app in removals if app.source == "managed"}),
+            "updates": sorted(updates),
         }
         cache = Path.home() / ".cache/shai"
         cache.mkdir(parents=True, exist_ok=True, mode=0o700)
@@ -1083,6 +1153,8 @@ class ShappWindow(Gtk.ApplicationWindow):
             append_log("STAGED_INSTALL", "catalog", str(item["id"]), str(item["name"]))
         for app in removals:
             append_log("STAGED_UNINSTALL", app.source, app.package, app.name)
+        for task in sorted(updates):
+            append_log("STAGED_UPDATE", "maintenance", task, "Approved online/local maintenance selection")
         command_line = self.terminal_command(plan)
         if command_line is None:
             self.show_status("No supported terminal is available. No changes were made.")
@@ -1120,6 +1192,9 @@ class ShappWindow(Gtk.ApplicationWindow):
         log_file = str(result.get("log_file", daily_log_path()))
         self.show_status(f"{message}\nDaily log: {log_file}")
         if result.get("status") == "success":
+            self.selected_updates.clear()
+            for check in self.update_checks.values():
+                check.set_active(False)
             self.apt_installed = installed_apt_packages()
             self.snap_installed = installed_snaps()
             self.container_installed = installed_containers()

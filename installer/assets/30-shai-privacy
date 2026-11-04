@@ -6,7 +6,7 @@ history-enabled=false
 daily-limit-enabled=false
 
 [org/gnome/desktop/break-reminders]
-selected-breaks=[]
+selected-breaks=@as []
 
 [org/gnome/desktop/notifications/application/org-gnome-evolution-alarm-notify]
 enable=false

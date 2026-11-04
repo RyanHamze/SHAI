@@ -29,9 +29,9 @@ with unittest.mock.patch.object(ui.subprocess, 'Popen', side_effect=lambda args,
 assert captured and any('bash' in str(x) for x in captured[0]), captured
 plans = sorted((Path.home() / '.cache/shai').glob('shapp-*.json'), key=lambda x: x.stat().st_mtime)
 plan = json.loads(plans[-1].read_text())
-assert plan['schema'] == 4 and 'wyoming' in plan['install'] and 'remove_managed' in plan
+assert plan['schema'] == 5 and 'wyoming' in plan['install'] and 'remove_managed' in plan and 'updates' in plan
 window.architecture_mode = 'managed-stack'
 for app_id in ['jellyfin','node-red','openhab','navidrome','plex','emby','adguard-home','pi-hole']:
     assert window.backend_available(next(x for x in window.catalog if x['id'] == app_id))
-print('PASS host/container backend selection, cart mapping, schema-4 plan, automatic visible-terminal command construction; no installs launched')
+print('PASS host/container backend selection, cart mapping, schema-5 plan, automatic visible-terminal command construction; no installs launched')
 window.destroy()

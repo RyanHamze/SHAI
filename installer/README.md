@@ -1,6 +1,6 @@
 # SHAI Setup installer
 
-This directory builds `shai-installer` 0.12.0 for a fresh, fully installed
+This directory builds `shai-installer` 0.13.1 for a fresh, fully installed
 Ubuntu Desktop 26.04 system on `amd64`.
 
 Installing the DEB is inert. It installs the SHAI Setup GUI, exact debloat
@@ -22,11 +22,12 @@ The graphical sequence is:
 4. Review the exact Setup plan.
 5. Apply in a separate visible Ubuntu terminal using normal sudo authentication.
 6. Run health checks, apply the reversible SHAI desktop theme, save the architecture, then open
-   SHAI Home and SHAPP.
+   the Setup completion page and SHAPP.
 
 Setup does not install Docker, Home Assistant, MQTT, Zigbee, Z-Wave, ESPHome,
 Matter, Node-RED, media servers, voice tools, AI runtimes, or model weights.
-Those are selected later in SHAPP or AIA. Home remains a handoff shell; SHAPP,
+Those are selected later in SHAPP or AIA. Setup stays in the application menu
+after completion, without a desktop shortcut or login autostart. SHAPP,
 SHEALTH, and AIA have functional local backends and report unavailable services
 honestly.
 
@@ -69,7 +70,7 @@ with approval.
 
 ## SHAPP functional draft
 
-Version 0.12.0 includes the SHAPP manager, SHEALTH dashboard, and AIA
+Version 0.13.1 includes the SHAPP manager, SHEALTH dashboard, and AIA
 offline-first local model advisor and assistant.
 Recommended and Optional tabs use the audited SHAI catalog. The
 Currently Installed tab discovers user-facing APT, Snap, and local desktop

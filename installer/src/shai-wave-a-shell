@@ -245,6 +245,8 @@ class ShellApplication(Gtk.Application):
 
 def main() -> int:
     mode = sys.argv[1] if len(sys.argv) > 1 else "home"
+    if mode in {"home", "appearance"}:
+        os.execv('/usr/bin/shai-setup', ['shai-setup'])
     return ShellApplication(mode).run([sys.argv[0]])
 
 

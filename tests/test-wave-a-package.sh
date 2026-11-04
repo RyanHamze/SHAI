@@ -3,7 +3,7 @@ set -Eeuo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 readonly ROOT
-readonly PACKAGE="${1:-$ROOT/dist/shai-installer_0.12.0_amd64.deb}"
+readonly PACKAGE="${1:-$ROOT/dist/shai-installer_0.13.1_amd64.deb}"
 TEST_DIR="$(mktemp -d /tmp/shai-wave-a-package-test.XXXXXX)"
 readonly TEST_DIR
 USER_NAME="$(id -un)"
@@ -169,7 +169,7 @@ python3 -m py_compile \
     "$TEST_DIR/root/usr/bin/shai-aia" \
     "$TEST_DIR/root/usr/bin/shai-aia-server" \
     "$TEST_DIR/root/usr/bin/shai-wave-a-shell" \
-    "$TEST_DIR/root/usr/bin/shai-appearance" \
+    "$TEST_DIR/root/usr/lib/shai-installer/shai-launcher-sync" \
     "$TEST_DIR/root/usr/lib/shai-installer/shai-plan-validator" \
     "$TEST_DIR/root/usr/lib/shai-installer/shai-system-summary"
 
@@ -216,7 +216,7 @@ for path in \
     usr/bin/shai-theme-reset \
     usr/bin/shai-theme-default \
     usr/bin/shai-terminal-theme-apply \
-    usr/bin/shai-appearance \
+    usr/lib/shai-installer/shai-launcher-sync \
     usr/lib/shai-installer/shai-plan-validator \
     usr/lib/shai-installer/shai-system-summary \
     usr/lib/shai-installer/catalog/shapp-apps.json \
@@ -277,7 +277,7 @@ bash -n \
     "$TEST_DIR/root/usr/bin/shai-theme-default" \
     "$TEST_DIR/root/usr/bin/shai-terminal-theme-apply"
 
-for deferred in shai-home.desktop shai-shapp.desktop shai-health.desktop shai-aia.desktop shai-appearance.desktop; do
+for deferred in shai-shapp.desktop shai-health.desktop shai-aia.desktop; do
     [[ ! -e "$TEST_DIR/root/usr/share/applications/$deferred" ]] || {
         printf 'Deferred launcher was exposed before setup: %s\n' "$deferred" >&2
         exit 1
@@ -287,6 +287,10 @@ for deferred in shai-home.desktop shai-shapp.desktop shai-health.desktop shai-ai
         exit 1
     }
 done
+test ! -e "$TEST_DIR/root/usr/bin/shai-appearance"
+test ! -e "$TEST_DIR/root/usr/share/applications/shai-home.desktop"
+test ! -e "$TEST_DIR/root/usr/share/applications/shai-appearance.desktop"
+grep -Fxq 'Name=SHAI Setup' "$TEST_DIR/root/usr/share/applications/shai-setup.desktop"
 
 grep -Fq "whitelisted-providers=['']" \
     "$TEST_DIR/root/usr/lib/shai-installer/assets/30-shai-privacy"
@@ -387,7 +391,15 @@ if grep -Fq '"Docker"' "$TEST_DIR/root/usr/bin/shai-health"; then
     printf 'SHEALTH still exposes the internal Docker implementation name.\n' >&2
     exit 1
 fi
-grep -Fq '"schema": 4' "$TEST_DIR/root/usr/bin/shai-shapp"
+grep -Fq '"schema": 5' "$TEST_DIR/root/usr/bin/shai-shapp"
+test -x "$TEST_DIR/root/usr/lib/shai-installer/shai-update-apply"
+python3 - "$TEST_DIR/root/usr/lib/shai-installer/catalog/shapp-updates.json" <<'PY'
+import json, sys
+tasks = json.load(open(sys.argv[1]))['tasks']
+assert len(tasks) == 10
+assert len({task['id'] for task in tasks}) == 10
+assert all(task['command'] and task['description'] for task in tasks)
+PY
 grep -Fq 'remove_container' "$TEST_DIR/root/usr/bin/shai-shapp-apply"
 grep -Fq 'home-assistant:2026.9.3' "$TEST_DIR/root/usr/lib/shai-installer/catalog/shai-stack-services.json"
 grep -Fq 'open-webui:v0.12.5-slim' "$TEST_DIR/root/usr/lib/shai-installer/catalog/shai-stack-services.json"

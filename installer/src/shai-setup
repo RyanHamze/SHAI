@@ -46,6 +46,7 @@ window { background: #0B0F0C; color: #DDFBE0; }
 .step { color: #93A89A; padding: 9px 10px; }
 .step-active { color: #33EE33; background: #162019; border-radius: 4px; padding: 9px 10px; font-weight: 700; }
 .page { padding: 28px 34px; }
+.complete-page { padding: 16px 24px; }
 .page-title { color: #DDFBE0; font-size: 24px; font-weight: 700; }
 .page-copy { color: #A7B7AA; font-size: 14px; }
 .section-title { color: #8DF28D; font-size: 16px; font-weight: 700; margin-top: 12px; }
@@ -140,6 +141,7 @@ class SetupWindow(Gtk.ApplicationWindow):
         self.stack = Gtk.Stack()
         self.stack.set_hexpand(True)
         self.stack.set_vexpand(True)
+        self.stack.set_vhomogeneous(False)
         self.stack.set_transition_type(Gtk.StackTransitionType.CROSSFADE)
         body.append(self.stack)
 
@@ -294,8 +296,10 @@ class SetupWindow(Gtk.ApplicationWindow):
         page.append(ai_row)
         offline_row, self.offline_mode = self.purpose_row(
             "Operate the environment offline by default",
-            "Keep web access disabled after setup. Local services remain available. Future "
-            "online downloads require a separate, visible approval.",
+            "Keep web access disabled after setup. Installed local apps can run without "
+            "internet; downloads and updates need separate approval. Local-network devices "
+            "remain available where configured. Web Offline is proxy-based, not a host-wide "
+            "firewall or physical air gap.",
             True,
         )
         page.append(offline_row)
@@ -339,6 +343,9 @@ class SetupWindow(Gtk.ApplicationWindow):
             "page-copy",
         ))
         self.apply_status = label("Ready to open the visible terminal.", "status")
+        self.apply_status.set_markup(
+            '<span foreground="#33EE33" weight="bold">Ready</span> to open the visible terminal.'
+        )
         page.append(self.apply_status)
         self.apply_button = Gtk.Button(label="Apply in visible terminal")
         self.apply_button.add_css_class("suggested-action")
@@ -348,36 +355,35 @@ class SetupWindow(Gtk.ApplicationWindow):
         return scroll
 
     def build_complete_page(self) -> Gtk.Widget:
-        scroll, page = self.page()
-        page.append(label("SHAI Setup is complete", "page-title"))
+        page = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10)
+        page.add_css_class("complete-page")
+        title = label("SHAI has completed setup successfully.", "page-title")
+        title.set_markup('SHAI has completed setup <span foreground="#33EE33">successfully.</span>')
+        page.append(title)
         page.append(label(
             "Ubuntu is still the operating system. SHAI's base profile, desktop theme, "
             "architecture choice, and core launchers are now configured.",
             "page-copy",
         ))
-        self.complete_status = label("SHAI Home is opening.", "status")
+        self.complete_status = label("", "status")
+        self.complete_status.set_markup('<span foreground="#33EE33">Final health checks passed.</span>')
         page.append(self.complete_status)
         self.complete_summary = Gtk.TextView()
         self.complete_summary.set_editable(False)
         self.complete_summary.set_cursor_visible(False)
         self.complete_summary.set_monospace(True)
-        self.complete_summary.set_vexpand(True)
-        self.complete_summary.set_size_request(-1, 300)
+        self.complete_summary.set_wrap_mode(Gtk.WrapMode.WORD_CHAR)
         self.complete_summary.get_buffer().set_text(
             "The completed-system summary will appear here after validation."
         )
-        page.append(self.complete_summary)
-        page.append(label(
-            "SHAI Home shows the environment summary. Continue to SHAPP to select local apps "
-            "and tools when its catalog is available.",
-            "warning",
-        ))
-        open_shapp = Gtk.Button(label="Close SHAI Home and open SHAPP")
-        open_shapp.add_css_class("suggested-action")
-        open_shapp.set_halign(Gtk.Align.START)
-        open_shapp.connect("clicked", self.close_home_open_shapp)
-        page.append(open_shapp)
-        return scroll
+        self.summary_scroll = Gtk.ScrolledWindow()
+        self.summary_scroll.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+        self.summary_scroll.set_min_content_height(80)
+        self.summary_scroll.set_propagate_natural_height(False)
+        self.summary_scroll.set_vexpand(True)
+        self.summary_scroll.set_child(self.complete_summary)
+        page.append(self.summary_scroll)
+        return page
 
     def build_footer(self) -> Gtk.Widget:
         footer = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
@@ -395,6 +401,10 @@ class SetupWindow(Gtk.ApplicationWindow):
         self.next.add_css_class("suggested-action")
         self.next.connect("clicked", self.go_next)
         footer.append(self.next)
+        self.finish = Gtk.Button(label="Close SHAI Setup and open SHAPP")
+        self.finish.add_css_class("suggested-action")
+        self.finish.connect("clicked", self.close_home_open_shapp)
+        footer.append(self.finish)
         return footer
 
     def show_step(self, index: int) -> None:
@@ -413,6 +423,7 @@ class SetupWindow(Gtk.ApplicationWindow):
     def update_navigation(self) -> None:
         self.back.set_sensitive(0 < self.index < 4)
         self.next.set_visible(self.index < 4)
+        self.finish.set_visible(self.index == 5)
         self.next.set_sensitive(self.index != 0 or self.debloat_confirm.get_active())
         self.cancel.set_label("No, exit setup" if self.index == 0 else "Exit setup")
         if self.index == 0:
@@ -449,7 +460,7 @@ class SetupWindow(Gtk.ApplicationWindow):
             "2. Keep personal files and media outside the operation scope.",
             "3. Apply the reversible SHAI wallpaper, GTK colors, icons, dark mode, and green accent.",
             "   GNOME Shell styling activates when Ubuntu's optional User Themes extension is available.",
-            "4. Install SHAI Home, SHAPP, SHAI Health, and Web Offline launchers.",
+            "4. Install SHAI Setup, SHAPP, SHAI Health, and Web Offline launchers; keep Setup in the app menu after completion.",
             f"5. Architecture: {architecture}.",
             f"6. Smart-home intent: {'Yes' if self.smart_home.get_active() else 'No'}.",
             f"7. Local-AI intent: {'Yes; install AIA launcher only' if self.local_ai.get_active() else 'No'}.",
@@ -458,7 +469,7 @@ class SetupWindow(Gtk.ApplicationWindow):
             "10. Disable media sharing, location grants, and Wellbeing tracking; keep automatic time sync on.",
             "11. Apply the black and #33EE33 SHAI terminal palette.",
             "12. Save choices, inventory the completed system, and run final health checks.",
-            "13. Show the completed-system summary and open SHAI Home.",
+            "13. Show the completed-system summary in SHAI Setup.",
         ]
         self.review.get_buffer().set_text("\n".join(lines))
 
@@ -541,10 +552,11 @@ class SetupWindow(Gtk.ApplicationWindow):
                     summary = "System summary was not available. Review the installer log."
                 self.complete_summary.get_buffer().set_text(summary)
                 self.show_step(5)
-                GLib.timeout_add(800, self.open_default_shells)
             else:
                 self.apply_status.set_text(
-                    f"SHAI Setup stopped safely: {result.get('message', 'Review the terminal and installer log.')}"
+                    f"SHAI Setup stopped; earlier changes may already have been applied. "
+                    f"{result.get('message', 'Review the terminal and installer log.')}\n"
+                    f"Log: {result.get('log', 'See the visible terminal.')}"
                 )
                 self.apply_button.set_sensitive(True)
             return False
@@ -570,10 +582,47 @@ class SetupWindow(Gtk.ApplicationWindow):
         return None
 
     def close_home_open_shapp(self, _button: Gtk.Button) -> None:
-        if self.home_process and self.home_process.poll() is None:
-            self.home_process.terminate()
-        self.launch_shell("shapp")
+        executable = shutil.which("shai-shapp")
+        runner = shutil.which("systemd-run")
+        if not executable or not runner:
+            self.show_message("Could not open SHAPP", "SHAPP or the user-session launcher is unavailable. Setup will stay open.")
+            return
+        unit = f"shai-shapp-{uuid.uuid4().hex}"
+        command = [runner, "--user", "--quiet", "--collect", f"--unit={unit}", "--property=Type=exec"]
+        for name in ("DISPLAY", "WAYLAND_DISPLAY", "XAUTHORITY", "XDG_RUNTIME_DIR", "DBUS_SESSION_BUS_ADDRESS", "GSK_RENDERER"):
+            if name in os.environ:
+                command.append(f"--setenv={name}={os.environ[name]}")
+        command.append(executable)
+        try:
+            # Keep SHAPP out of Setup's service group so closing Setup cannot kill it.
+            subprocess.run(command, check=True, capture_output=True, text=True, timeout=10)
+        except (OSError, subprocess.SubprocessError) as exc:
+            self.show_message("Could not open SHAPP", str(getattr(exc, "stderr", "") or exc))
+            return
+        GLib.timeout_add(800, self.finish_shapp_handoff, unit)
+
+    def finish_shapp_handoff(self, unit: str) -> bool:
+        try:
+            status = subprocess.run(["systemctl", "--user", "is-active", "--quiet", unit], timeout=5)
+        except (OSError, subprocess.SubprocessError) as exc:
+            self.show_message("Could not verify SHAPP", str(exc))
+            return False
+        if status.returncode:
+            # A second GApplication process exits after presenting an existing SHAPP window.
+            try:
+                owner = subprocess.run([
+                    "gdbus", "call", "--session", "--dest", "org.freedesktop.DBus",
+                    "--object-path", "/org/freedesktop/DBus", "--method",
+                    "org.freedesktop.DBus.NameHasOwner", "com.aabey.shai.Shapp",
+                ], capture_output=True, text=True, timeout=5)
+                running = owner.returncode == 0 and owner.stdout.strip() == "(true,)"
+            except (OSError, subprocess.SubprocessError):
+                running = False
+            if not running:
+                self.show_message("SHAPP did not stay open", f"Setup will stay open. Review the launch log: journalctl --user -u {unit}")
+                return False
         self.close()
+        return False
 
     def show_message(self, title: str, body: str) -> None:
         dialog = Gtk.AlertDialog(message=title, detail=body)
