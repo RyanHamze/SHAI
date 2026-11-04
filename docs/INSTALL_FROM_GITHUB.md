@@ -7,14 +7,15 @@ account that has access; never put a token or password into a pasted command.
 ## One-Time Prerequisites
 
 ```bash
-sudo apt update && sudo apt install -y gh git curl python3 ca-certificates
+sudo apt -o Acquire::ForceIPv4=true update
+sudo apt -o Acquire::ForceIPv4=true install -y gh git curl python3 ca-certificates
 gh auth login --hostname github.com --web --git-protocol https
 ```
 
 ## Download And Open Setup
 
 ```bash
-gh auth setup-git && gh repo clone RyanHamze/SHAI && bash SHAI/install.sh
+gh auth setup-git && gh repo clone RyanHamze/SHAI -- --ipv4 --depth 1 && bash SHAI/install.sh
 ```
 
 Run from your home directory, where a `SHAI` folder does not already exist.

@@ -41,9 +41,10 @@ after completion, without a desktop shortcut or login autostart.
 Run these commands in a fresh Ubuntu desktop terminal as your normal user:
 
 ```bash
-sudo apt update && sudo apt install -y gh git curl python3 ca-certificates
+sudo apt -o Acquire::ForceIPv4=true update
+sudo apt -o Acquire::ForceIPv4=true install -y gh git curl python3 ca-certificates
 gh auth login --hostname github.com --web --git-protocol https
-gh auth setup-git && gh repo clone RyanHamze/SHAI && bash SHAI/install.sh
+gh auth setup-git && gh repo clone RyanHamze/SHAI -- --ipv4 --depth 1 && bash SHAI/install.sh
 ```
 
 The private repository requires GitHub access. The downloaded entry point
