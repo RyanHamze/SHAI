@@ -5,9 +5,9 @@ set -Eeuo pipefail
 
 readonly SHAI_VERSION=0.14.0
 readonly PACKAGE="shai-installer_${SHAI_VERSION}_amd64.deb"
-# Release engineering must replace both zero pins before publication.
-readonly SHA256=0000000000000000000000000000000000000000000000000000000000000000
-readonly SOURCE_COMMIT=0000000000000000000000000000000000000000
+# Independent release pins; never substitute downloaded checksum metadata.
+readonly SHA256=3a9fa6c11ff5598cf53b0574ef83e19383b9cb5977d01813dd905efe70f784d9
+readonly SOURCE_COMMIT=8996f2eeba560c91505a7d1817748819899dd156
 readonly SOURCE_REF="refs/tags/v${SHAI_VERSION}"
 readonly RELEASE_URL="https://github.com/RyanHamze/SHAI/releases/download/v${SHAI_VERSION}"
 readonly ARTIFACT_URL="$RELEASE_URL/$PACKAGE"

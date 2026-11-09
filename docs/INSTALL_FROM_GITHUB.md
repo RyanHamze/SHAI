@@ -4,6 +4,10 @@ Target: Ubuntu Desktop 26.04.x LTS, amd64, in your normal desktop terminal.
 The public v0.14.0 release needs no GitHub account, token, Git clone or login.
 Create a recoverable checkpoint before installing.
 
+The public release and credential-free verification-only flow were validated
+on 2026-11-09 on the development host and the Ubuntu test VM. Full fresh-Ubuntu
+Setup/debloat acceptance remains the next checkpoint test, not an implied pass.
+
 ## Download And Open Setup
 
 Run these three commands separately from a directory you own. The first installs
@@ -87,9 +91,11 @@ settings must permit the explicitly requested downloads and trust verification.
 
 ## Release Preparation
 
-The development bootstrap intentionally contains all-zero package SHA-256 and
-source commit placeholders and refuses downloads until release engineering fills
-both. Freeze build commit A, tag it `v0.14.0`, and build/attest that exact source.
+During release preparation, all-zero SHA-256/source pins fail closed. The
+finalized main-branch bootstrap pins package SHA-256
+`3a9fa6c11ff5598cf53b0574ef83e19383b9cb5977d01813dd905efe70f784d9`
+and source `8996f2eeba560c91505a7d1817748819899dd156`.
+Freeze build commit A, tag it `v0.14.0`, and build/attest that exact source.
 Attach the exact DEB and its Sigstore bundle named
 `shai-installer_0.14.0_amd64.deb.intoto.jsonl` to the public release. Finalize the
 bootstrap in later commit B with the verified DEB hash and source commit A; do
