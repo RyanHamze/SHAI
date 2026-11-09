@@ -8,13 +8,25 @@ replay was performed on the working VM; that is the next checkpoint test.
 
 - DEB: `shai-installer_0.14.0_amd64.deb`.
 - SHA-256: `3a9fa6c11ff5598cf53b0574ef83e19383b9cb5977d01813dd905efe70f784d9`.
-- Signing: intended GitHub keyless SLSA workflow provenance for the DEB,
-  SHA256SUMS and app catalog. Publication requires actual verification.
+- Signing: GitHub keyless SLSA workflow provenance for the DEB, SHA256SUMS and
+  app catalog independently verified on 2026-11-09, including signatures,
+  repository/workflow, source tag/commit and hosted-runner policy.
 - No publisher GPG private key is available. No publisher-signed APT metadata
   or individual executable signature is claimed. App byte hashes are included
   in the attested catalog; the attested DEB authenticates its complete payload.
-- Tag/CI/provenance verification details are recorded after the frozen build
-  succeeds; the bootstrap is promoted separately with the exact source pin.
+- Source/tag: `v0.14.0`, commit `8996f2eeba560c91505a7d1817748819899dd156`.
+- PR #8 checks and main/tag CI passed. Tag build: run `42679922541`.
+- Public attestation: https://github.com/RyanHamze/SHAI/attestations/65485717
+- Clean local rebuild, both PR build downloads and the tag artifact have the
+  exact package hash above. Package size: 3,773,350 bytes.
+- Bootstrap is promoted in a later commit, with the unchanged exact release
+  source and DEB pins. The release tag is not moved to the bootstrap commit.
+- Public prerelease: https://github.com/RyanHamze/SHAI/releases/tag/v0.14.0
+- After publication, independent public downloads matched SHA256SUMS. Actual
+  rootless `install.sh --verify-only` passed on both the development host and
+  Ubuntu VM, using isolated credential-free CLI homes and the verified portable
+  verifier. No GitHub login, installation or Setup application occurred in those
+  verification-only runs. Main-branch promotion is checked separately afterward.
 
 ## Diagnosed And Fixed
 
@@ -46,6 +58,10 @@ replay was performed on the working VM; that is the next checkpoint test.
 - Full local package suite: 16 suites, 161 checks, one local compiler-dependent
   skip. All four policy/compiler checks pass on the Ubuntu VM. CI installs
   dconf-cli so that check runs there rather than silently skipping.
+- Release CI runs bootstrap tests unprivileged, so its root container does not
+  skip those checks. The tagged build passed all suites, including compiler
+  and bootstrap validation. Nov 9 live recheck confirmed the final artifact
+  hash, private shared memory and no failed user units on the VM.
 - ShellCheck 0.11.0 passed for bootstrap/build/Setup/prerm/release/test/tool
   shell sources. Python compilation and shell syntax checks passed.
 - Real installed GTK pages: all Setup, SHEALTH and AIA tabs construct.
