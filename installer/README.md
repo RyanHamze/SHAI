@@ -1,6 +1,6 @@
 # SHAI Setup installer
 
-This directory builds `shai-installer` 0.13.1 for a fresh, fully installed
+This directory builds `shai-installer` 0.14.0 for a fresh, fully installed
 Ubuntu Desktop 26.04 system on `amd64`.
 
 Installing the DEB is inert. It installs the SHAI Setup GUI, exact debloat
@@ -70,7 +70,7 @@ with approval.
 
 ## SHAPP functional draft
 
-Version 0.13.1 includes the SHAPP manager, SHEALTH dashboard, and AIA
+Version 0.14.0 includes the SHAPP manager, SHEALTH dashboard, and AIA
 offline-first local model advisor and assistant.
 Recommended and Optional tabs use the audited SHAI catalog. The
 Currently Installed tab discovers user-facing APT, Snap, and local desktop

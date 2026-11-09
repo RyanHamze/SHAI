@@ -20,13 +20,14 @@ jobs:
       - name: Install build dependencies
         run: |
           apt-get update
-          DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends apt-utils bash ca-certificates coreutils dpkg-dev findutils git gzip perl python3 shellcheck tar util-linux
+          DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends apt-utils bash ca-certificates coreutils dconf-cli dpkg-dev findutils git gzip perl python3 shellcheck tar util-linux
       - name: Static analysis
         run: |
           shellcheck \
             install.sh \
             installer/build.sh \
             installer/src/shai-installer \
+            installer/debian/prerm \
             installer/src/shai-theme-apply \
             installer/src/shai-theme-default \
             installer/src/shai-theme-reset \
@@ -39,10 +40,22 @@ jobs:
           chmod +x installer/build.sh installer/src/* release/*.sh tests/*.sh tools/*.sh connectivity/bin/*
           tests/test-package.sh
       - name: Attest DEB provenance
+        id: provenance
         if: github.event_name != 'pull_request' && github.event.repository.visibility == 'public'
         uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4
         with:
-          subject-path: dist/shai-installer_*_amd64.deb
+          subject-path: |
+            dist/shai-installer_*_amd64.deb
+            dist/SHA256SUMS
+            dist/SHAI-APP-CATALOG.json
+      - name: Preserve public verification bundle
+        if: steps.provenance.outputs.bundle-path != ''
+        env:
+          BUNDLE: ${{ steps.provenance.outputs.bundle-path }}
+        run: |
+          for deb in dist/shai-installer_*_amd64.deb; do
+            install -m 0644 "$BUNDLE" "$deb.intoto.jsonl"
+          done
       - name: Upload release bundle
         uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5
         with:
@@ -51,9 +64,10 @@ jobs:
             dist/shai-installer_*_amd64.deb
             dist/SHA256SUMS
             dist/SHAI-APP-CATALOG.json
+            dist/*.intoto.jsonl
           if-no-files-found: error
   draft-release:
-    if: startsWith(github.ref, 'refs/tags/v')
+    if: startsWith(github.ref, 'refs/tags/v') && vars.SHAI_ENABLE_OFFLINE_APT_RELEASE == 'true'
     needs: build
     runs-on: ubuntu-24.04
     environment: release

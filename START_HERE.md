@@ -1,10 +1,14 @@
 # Start the SHAI installer implementation
 
-Current package: **0.13.1**, Ubuntu Desktop 26.04 amd64. Start with
-[Install From GitHub](docs/INSTALL_FROM_GITHUB.md) for the authenticated test
+Current package: **0.14.0**, Ubuntu Desktop 26.04 amd64. Start with
+[Install From GitHub](docs/INSTALL_FROM_GITHUB.md) for the public verified test
 command. Older version descriptions below are historical context, not the
 current package or installation procedure. Home/Appearance launchers have been
 retired; Setup remains in the application menu, with no login autostart.
+
+Ryan's **TA3** workflow is `docs/TA3_PROTOCOL.md`. Latest validation evidence is
+`docs/RELEASE_0_14_0_VALIDATION.md`. His explicit TA3 request supersedes prior
+source-only restrictions for this release, not unrelated private files.
 
 Read `PROJECT_CONTEXT.md` for shared memory, completed work, current assignments and relevant file locations before loading detailed history.
 

@@ -14,7 +14,7 @@ import sys
 APPLICATIONS = Path('/usr/share/applications')
 STATE = Path('/var/lib/shai-installer')
 LAUNCHERS = {
-    'shai-shapp.desktop': 'shai-shapp.desktop',
+    'shai-shapp.desktop': 'com.aabey.shai.Shapp.desktop',
     'shai-health.desktop': 'com.aabey.shai.Health.desktop',
     'shai-aia.desktop': 'com.aabey.shai.AIA.desktop',
     'shai-web-connectivity-toggle.desktop': 'shai-web-connectivity-toggle.desktop',
@@ -87,6 +87,8 @@ def sync_user():
         if completed:
             obsolete.add('shai-setup.desktop')
         updated = [item for item in favorites if item not in obsolete]
+        if (APPLICATIONS / 'com.aabey.shai.Shapp.desktop').is_file():
+            updated = list(dict.fromkeys('com.aabey.shai.Shapp.desktop' if item == 'shai-shapp.desktop' else item for item in updated))
         if updated != favorites:
             subprocess.run(['gsettings', 'set', 'org.gnome.shell', 'favorite-apps', repr(updated)], check=True)
 
@@ -102,6 +104,8 @@ def main():
             raise SystemExit('A regular desktop user is required')
         for name in ('shai-home.desktop', 'shai-appearance.desktop'):
             remove_known(APPLICATIONS / name, LEGACY[name])
+        if (APPLICATIONS / 'com.aabey.shai.Shapp.desktop').is_file():
+            remove_known(APPLICATIONS / 'shai-shapp.desktop', {'shai-shapp'})
         runtime = f'/run/user/{account.pw_uid}'
         subprocess.run(['runuser', '-u', account.pw_name, '--', 'env', f'HOME={account.pw_dir}',
                         f'XDG_RUNTIME_DIR={runtime}', f'DBUS_SESSION_BUS_ADDRESS=unix:path={runtime}/bus',

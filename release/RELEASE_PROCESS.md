@@ -1,5 +1,18 @@
 # SHAI release process
 
+Public test candidates use verified GitHub keyless workflow provenance, SHA-256
+manifests and app hashes in the attested catalog. They are NOT publisher-GPG-
+signed APT releases. Their bootstrap pins the exact tag, commit, workflow and
+DEB hash and verifies the public Sigstore bundle. Publish only as an explicitly
+labelled prerelease after all TA3 gates pass, never production-certified.
+
+The protected draft-release job below runs only when repository variable
+`SHAI_ENABLE_OFFLINE_APT_RELEASE=true` is deliberately enabled for the offline
+APT channel. Its protected environment remains required; the test route does
+not alter that environment or manufacture publisher keys.
+
+## Production Offline APT Channel
+
 1. Merge reviewed source and create a protected `vX.Y.Z` tag.
 2. GitHub Actions builds, tests, hashes, and attests the `.deb`.
 3. GitHub creates a draft release.

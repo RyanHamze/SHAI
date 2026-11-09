@@ -3,7 +3,7 @@ set -Eeuo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 readonly ROOT
-readonly VERSION="0.13.1"
+readonly VERSION="0.14.0"
 readonly PACKAGE="shai-installer_${VERSION}_amd64"
 BUILD_ROOT="$(mktemp -d "/tmp/shai-installer-build-${VERSION}.XXXXXX")"
 readonly BUILD_ROOT
@@ -39,6 +39,7 @@ install -d \
     "$DIST"
 
 install -m 0644 "$ROOT/installer/debian/control" "$STAGE/DEBIAN/control"
+install -m 0755 "$ROOT/installer/debian/prerm" "$STAGE/DEBIAN/prerm"
 install -m 0755 "$ROOT/installer/src/shai-installer" "$STAGE/usr/bin/shai-installer"
 install -m 0755 "$ROOT/installer/src/shai-setup" "$STAGE/usr/bin/shai-setup"
 install -m 0755 "$ROOT/installer/src/shai-shapp" "$STAGE/usr/bin/shai-shapp"
@@ -48,6 +49,8 @@ install -m 0755 "$ROOT/installer/src/shai-app-install" "$STAGE/usr/lib/shai-inst
 install -m 0755 "$ROOT/installer/src/shai-source-install" "$STAGE/usr/lib/shai-installer/shai-source-install"
 install -m 0755 "$ROOT/installer/src/shai-update-apply" "$STAGE/usr/lib/shai-installer/shai-update-apply"
 install -m 0755 "$ROOT/installer/src/shai-launcher-sync" "$STAGE/usr/lib/shai-installer/shai-launcher-sync"
+install -m 0755 "$ROOT/installer/src/shai-context" "$STAGE/usr/lib/shai-installer/shai-context"
+install -m 0755 "$ROOT/installer/src/shai-context-gateway" "$STAGE/usr/lib/shai-installer/shai-context-gateway"
 install -m 0755 "$ROOT/installer/src/shai-network-snapshot" "$STAGE/usr/lib/shai-installer/shai-network-snapshot"
 install -m 0755 "$ROOT/installer/src/shai-shapp-log" "$STAGE/usr/lib/shai-installer/shai-shapp-log"
 install -m 0755 "$ROOT/installer/src/shai-health" "$STAGE/usr/bin/shai-health"
@@ -81,6 +84,9 @@ install -m 0644 "$ROOT/installer/catalog/shai-stack-services.json" "$STAGE/usr/l
 install -m 0644 "$ROOT/installer/systemd/shai-network-snapshot.service" "$STAGE/usr/lib/systemd/system/shai-network-snapshot.service"
 install -m 0644 "$ROOT/installer/systemd/shai-network-snapshot.timer" "$STAGE/usr/lib/systemd/system/shai-network-snapshot.timer"
 install -m 0644 "$ROOT/installer/systemd/shai-aia-model.service" "$STAGE/usr/lib/systemd/user/shai-aia-model.service"
+install -m 0644 "$ROOT/installer/systemd/shai-context-gateway.service" "$STAGE/usr/lib/systemd/user/shai-context-gateway.service"
+install -m 0644 "$ROOT/installer/systemd/shai-context.service" "$STAGE/usr/lib/systemd/user/shai-context.service"
+install -m 0644 "$ROOT/installer/systemd/shai-context.timer" "$STAGE/usr/lib/systemd/user/shai-context.timer"
 install -m 0644 "$ROOT/installer/systemd/shai-control-broker.service" "$STAGE/usr/lib/systemd/system/shai-control-broker.service"
 
 for file in \
@@ -112,8 +118,10 @@ install -m 0644 "$ROOT/installer/SETUP_README.md" "$STAGE/usr/share/doc/shai-ins
 install -m 0644 "$ROOT/docs/THIRD_PARTY_NOTICES.md" "$STAGE/usr/share/doc/shai-installer/THIRD_PARTY_NOTICES.md"
 install -m 0644 "$ROOT/docs/AIA_CONTROL_BROKER.md" "$STAGE/usr/share/doc/shai-installer/AIA_CONTROL_BROKER.md"
 install -m 0644 "$ROOT/docs/SHAPP_INSTALL_BACKENDS.md" "$STAGE/usr/share/doc/shai-installer/SHAPP_INSTALL_BACKENDS.md"
+install -m 0644 "$ROOT/docs/SHARED_AI_ACCESS_PLAN.md" "$STAGE/usr/share/doc/shai-installer/SHARED_AI_ACCESS_PLAN.md"
 install -m 0644 "$ROOT/docs/RELEASE_0_12_0_AUDIT.md" "$STAGE/usr/share/doc/shai-installer/RELEASE_0_12_0_AUDIT.md"
 install -m 0644 "$ROOT/installer/share/applications/shai-setup.desktop" "$STAGE/usr/share/applications/shai-setup.desktop"
+install -m 0644 "$ROOT/installer/share/applications/shai-shapp.desktop" "$STAGE/usr/share/applications/com.aabey.shai.Shapp.desktop"
 install -m 0644 "$ROOT/installer/share/applications/shai-control.desktop" "$STAGE/usr/share/applications/shai-control.desktop"
 for launcher in shai-setup.desktop shai-shapp.desktop shai-health.desktop shai-aia.desktop shai-control.desktop; do
     install -m 0644 "$ROOT/installer/share/applications/$launcher" "$STAGE/usr/lib/shai-installer/assets/launchers/$launcher"
