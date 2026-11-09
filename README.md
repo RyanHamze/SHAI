@@ -12,13 +12,13 @@ trademark of Canonical Ltd.
 
 ## Current package
 
-Version `0.13.1` targets Ubuntu Desktop 26.04 on `amd64`. Installing the DEB is
+Version `0.14.0` targets Ubuntu Desktop 26.04 on `amd64`. Installing the DEB is
 inert: no debloat, theme, policy, or application change occurs until the normal
 desktop user launches SHAI Setup, reviews the plan, and approves execution in a
 visible Ubuntu terminal with normal sudo authentication.
 
 ```bash
-sudo apt install ./shai-installer_0.13.1_amd64.deb
+sudo apt install ./shai-installer_0.14.0_amd64.deb
 shai-setup
 ```
 
@@ -30,28 +30,29 @@ The current package provides:
 - the proxy-based Web Offline toggle;
 - SHAPP, SHEALTH and AIA with local backends and approved terminal execution;
 - local evidence, before/after benchmarks, logs, and final health checks.
+- private shared AIA/Open WebUI context and explicit local memory notes.
 
 Optional applications, Docker services, Home Assistant, AI runtimes, and model
 weights are not silently installed by the base package. SHAPP manages approved
 app changes and checkbox-based maintenance tasks. Setup stays in the app menu
 after completion, without a desktop shortcut or login autostart.
 
-## Install From Private GitHub
+## Install From Public GitHub
 
 Run these commands in a fresh Ubuntu desktop terminal as your normal user:
 
 ```bash
-sudo apt -o Acquire::ForceIPv4=true update
-sudo apt -o Acquire::ForceIPv4=true install -y gh git curl python3 ca-certificates
-gh auth login --hostname github.com --web --git-protocol https
-gh auth setup-git && gh repo clone RyanHamze/SHAI -- --ipv4 --depth 1 && bash SHAI/install.sh
+sudo apt install curl python3 ca-certificates
+curl -fL https://raw.githubusercontent.com/RyanHamze/SHAI/main/install.sh -o shai-install.sh
+bash shai-install.sh
 ```
 
-The private repository requires GitHub access. The downloaded entry point
-verifies the fixed candidate's pinned checksum before asking for sudo and
-opening Setup. Nothing is debloated until you approve it in Setup. This test
-channel is not a publisher-signed APT release. For artifact expiry, frozen
-commit instructions and verify-only mode, see [the install guide](docs/INSTALL_FROM_GITHUB.md).
+No GitHub account is required. The entry point verifies the fixed release's
+pinned hash, signed GitHub workflow provenance, source commit and DEB identity
+before sudo. Nothing is debloated until you approve it in Setup. This is a public
+test candidate, not a publisher-GPG-signed APT release. See
+[the install guide](docs/INSTALL_FROM_GITHUB.md) for the initial bootstrap trust
+boundary, verification details and verify-only mode.
 
 ## Build and test
 
@@ -61,7 +62,7 @@ commit instructions and verify-only mode, see [the install guide](docs/INSTALL_F
 ```
 
 GitHub Actions builds, tests and hashes the DEB. The existing attestation step
-runs only for a public repository; this repository remains private. Production APT
+runs only for a public repository. Production APT
 metadata additionally requires the offline SHAI archive signature. Private
 keys, passphrases, and hardware-token PINs are never stored in this repository
 or GitHub Actions.
