@@ -1,9 +1,0 @@
-[Desktop Entry]
-Type=Application
-Name=SHAI Metadata Cleaner
-Comment=Inspect and remove file metadata locally using ExifTool
-Exec=shai-metadata
-Icon=shai-ai-advisor
-Terminal=false
-Categories=Utility;
-StartupWMClass=com.aabey.shai.Metadata

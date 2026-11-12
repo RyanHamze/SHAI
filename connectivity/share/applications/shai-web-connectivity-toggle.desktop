@@ -1,9 +1,0 @@
-[Desktop Entry]
-Type=Application
-Name=SHAI Web Offline / Online
-Comment=Toggle proxy-based web access while preserving local network access
-Exec=/usr/local/bin/shai-web-connectivity-toggle
-Icon=network-offline-symbolic
-Terminal=false
-Categories=System;
-Keywords=SHAI;offline;online;internet;network;proxy;

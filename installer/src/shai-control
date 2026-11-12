@@ -1,6 +1,0 @@
-#!/usr/bin/env python3
-"""Compatibility launcher: Control Center now lives inside AIA."""
-import os
-
-if __name__ == "__main__":
-    os.execvp("shai-aia", ["shai-aia", "--control-center"])
