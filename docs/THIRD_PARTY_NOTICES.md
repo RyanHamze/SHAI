@@ -24,7 +24,7 @@ A disclaimer does not replace applicable trademark or license obligations.
 
 ## Derived material
 
-## Tecnativa Docker Socket Proxy
+### Tecnativa Docker Socket Proxy
 
 SHAI's private read-only container observation component is derived from
 [Tecnativa/docker-socket-proxy](https://github.com/Tecnativa/docker-socket-proxy),
@@ -49,7 +49,7 @@ retain their separate notices. Consult the fork and exact image contents.
 
 ### GNOME Shell-derived theme
 
-The shipped [SHAI GNOME Shell stylesheet](../branding/theme/share/themes/SHAI/gnome-shell/gnome-shell.css)
+The shipped [SHAI GNOME Shell stylesheet](../licenses/shai-gnome-shell.css)
 identifies GNOME Shell 50.1's dark stylesheet as its source. Its retained
 header credits Red Hat, Inc. (2009, 2015), contributors and portions adapted
 from Mx's stylesheet, copyright Intel Corporation (2009). SHAI changes colors.
@@ -61,15 +61,14 @@ specifies LGPL version 2.1. Consult the actual source/license rather than
 assuming broader permissions from this summary. References:
 [GNOME Shell](https://gitlab.gnome.org/GNOME/gnome-shell),
 [LGPL 2.1](https://www.gnu.org/licenses/old-licenses/lgpl-2.1.html),
-[theme provenance](../branding/theme/README.md).
+[included license text](../licenses/LGPL-2.1.txt).
 
 The SHAI icon theme inherits installed
 [Adwaita](https://gitlab.gnome.org/GNOME/adwaita-icon-theme) and
 [hicolor](https://specifications.freedesktop.org/icon-theme-spec/latest/)
 icons rather than claiming their authorship. Existing
 [Yaru](https://github.com/ubuntu/yaru) components retain their own notices.
-SHAI artwork provenance is recorded under `branding/`; this document grants
-no third-party artwork rights.
+This document grants no third-party artwork rights.
 
 ## Runtime and host dependencies
 
@@ -136,11 +135,9 @@ User-modified repositories and externally installed apps may differ.
 - **Setup only** means additional dedicated configuration, not a finished
   generic installer. Installing tools does not configure or validate a service.
 
-Authoritative recipes: [SHAPP catalog](../installer/catalog/shapp-apps.json),
-[services](../installer/catalog/shai-stack-services.json),
-[host apps](../installer/src/shai-app-install),
-[publisher sources](../installer/src/shai-source-install),
-[voice tools](../installer/src/shai-voice-manage), [AIA](../installer/src/shai-aia).
+The tables describe the configured sources. Exact versions and execution
+details depend on the installed release; review the installation plan and
+download origin before approval.
 Each selected release, image, plugin, voice and model retains its own license
 and terms; no blanket open-source license or publisher endorsement is implied.
 

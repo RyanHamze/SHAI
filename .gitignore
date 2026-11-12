@@ -1,9 +1,18 @@
-/dist/
-/installer/build/
-/signed-release/
-__pycache__/
-*.pyc
-*.asc
-*.gpg
-*SECRET*
-*private*
+# This is a distribution-only checkout. Explicit additions require review.
+/*
+!/.gitignore
+!/README.md
+!/SECURITY.md
+!/install.sh
+!/.github/
+!/.github/workflows/
+!/.github/workflows/public-distribution.yml
+!/docs/
+/docs/*
+!/docs/INSTALL_FROM_GITHUB.md
+!/docs/USER_GUIDE.md
+!/docs/THIRD_PARTY_NOTICES.md
+!/licenses/
+/licenses/*
+!/licenses/LGPL-2.1.txt
+!/licenses/shai-gnome-shell.css

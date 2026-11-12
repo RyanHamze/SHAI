@@ -1,12 +1,17 @@
-# Security policy
+# Security
 
-Report vulnerabilities privately to `shai@aabeyllc.com`. Do not put secrets,
-private keys, personal data, or destructive proofs of concept in public issues.
+Report vulnerabilities privately to **shai@aabeyllc.com**. Do not post
+credentials, private keys, personal configuration or unredacted logs in public.
 
-Release verification requires GitHub provenance (`gh attestation verify FILE -R
-RyanHamze/SHAI`) and an offline OpenPGP signature checked against a fingerprint
-published independently by Aabey LLC. A checksum does not prove publisher
-identity, and a GitHub access token is not a signing key.
+Download SHAI from this repository's releases and use the verified installer
+entry point. It checks a pinned SHA-256, signed GitHub workflow provenance and
+package identity before installation. A checksum by itself is not a signature.
+The current release does not claim publisher-GPG-signed APT metadata or a
+separate publisher signature on every executable.
 
-SHAI must reject removal of protected Ubuntu packages in both its UI and
-privileged backend. There is no SHAI override.
+Review requested changes, use normal Ubuntu administrator authentication and
+keep a recoverable backup. Do not bypass verification failures. SHAI is test
+software; supported hardware and third-party services require user validation.
+
+See [verification instructions](docs/INSTALL_FROM_GITHUB.md) and
+[third-party terms](docs/THIRD_PARTY_NOTICES.md).
