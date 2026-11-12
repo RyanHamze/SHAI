@@ -10,6 +10,14 @@ SHAI is not an operating system, Ubuntu distribution, ISO, or replacement
 shell. It is not affiliated with or endorsed by Canonical. Ubuntu is a
 trademark of Canonical Ltd.
 
+## Credits, Licenses And Third-Party Sources
+
+See [third-party notices](docs/THIRD_PARTY_NOTICES.md) for Ubuntu/Canonical
+acknowledgments, non-affiliation statements, GNOME stylesheet and container
+observation credits, and per-app sources for SHAPP, AIA, voice tools and models.
+Optional apps retain their own terms and are obtained through approved package,
+publisher, registry or model downloads, not claimed as SHAI-authored code.
+
 ## Current package
 
 Version `0.14.0` targets Ubuntu Desktop 26.04 on `amd64`. Installing the DEB is
