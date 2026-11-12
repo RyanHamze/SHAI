@@ -3,11 +3,12 @@
 set +x
 set -Eeuo pipefail
 
-readonly SHAI_VERSION=0.14.0
+readonly SHAI_VERSION=0.15.0
 readonly PACKAGE="shai-installer_${SHAI_VERSION}_amd64.deb"
 # Independent release pins; never substitute downloaded checksum metadata.
-readonly SHA256=3a9fa6c11ff5598cf53b0574ef83e19383b9cb5977d01813dd905efe70f784d9
-readonly SOURCE_COMMIT=8996f2eeba560c91505a7d1817748819899dd156
+readonly SHA256=d0865636ae24c3d3fc63271e60e9e26db8e3fff1b2d7b2769faec0b6868112e5
+readonly SOURCE_COMMIT=b164483ae0690abfeb7c380386073827fa3172d0
+readonly VALIDATION_TYPE=https://aabeyllc.com/shai/release-validation/v1
 readonly SOURCE_REF="refs/tags/v${SHAI_VERSION}"
 readonly RELEASE_URL="https://github.com/RyanHamze/SHAI/releases/download/v${SHAI_VERSION}"
 readonly ARTIFACT_URL="$RELEASE_URL/$PACKAGE"
@@ -79,7 +80,7 @@ run_gh() (
 supports_attestations() {
     local help flag
     help="$(run_gh attestation verify --help 2>/dev/null)" || return 1
-    for flag in --bundle --repo --signer-workflow --source-ref --source-digest --hostname; do
+    for flag in --bundle --repo --signer-workflow --signer-digest --source-ref --source-digest --predicate-type --hostname; do
         [[ "$help" == *"$flag"* ]] || return 1
     done
 }
@@ -138,16 +139,40 @@ fi
 download "$ARTIFACT_URL.intoto.jsonl" "$work/$PACKAGE.intoto.jsonl" 1048576
 if ! run_gh attestation verify "$work/$PACKAGE" --bundle "$work/$PACKAGE.intoto.jsonl" \
     --hostname github.com --repo RyanHamze/SHAI \
-    --signer-workflow RyanHamze/SHAI/.github/workflows/build-attest-release.yml \
+    --signer-workflow RyanHamze/SHAI/.github/workflows/public-distribution.yml \
+    --signer-digest "$SOURCE_COMMIT" --predicate-type "$VALIDATION_TYPE" \
     --source-ref "$SOURCE_REF" --source-digest "$SOURCE_COMMIT" --deny-self-hosted-runners; then
     printf 'Attestation verification failed. No package was installed.\n' >&2; exit 1;
 fi
+python3 -I -B - "$work/$PACKAGE.intoto.jsonl" "$SHAI_VERSION" "$SOURCE_COMMIT" "$SHA256" <<'PY'
+import base64
+import json
+import pathlib
+import sys
+
+path, version, commit, digest = sys.argv[1:]
+bundle = json.loads(pathlib.Path(path).read_text())
+statement = json.loads(base64.b64decode(bundle['dsseEnvelope']['payload'], validate=True))
+predicate = statement['predicate']
+required = {'sha256', 'deb-identity', 'inert-install-controls', 'catalog-app-hashes', 'public-payload-policy'}
+if (statement.get('predicateType') != 'https://aabeyllc.com/shai/release-validation/v1'
+        or predicate.get('schemaVersion') != 1
+        or predicate.get('version') != version
+        or predicate.get('tag') != 'v' + version
+        or predicate.get('repository') != 'RyanHamze/SHAI'
+        or predicate.get('workflowCommit') != commit
+        or not required <= set(predicate.get('checks', []))
+        or not any(item.get('name') == f'shai-installer_{version}_amd64.deb'
+                   and item.get('digest', {}).get('sha256') == digest
+                   for item in statement.get('subject', []))):
+    raise SystemExit('Signed release-validation policy mismatch. No software installed.')
+PY
 [[ "$(dpkg-deb --field "$work/$PACKAGE" Package)" == shai-installer &&
    "$(dpkg-deb --field "$work/$PACKAGE" Version)" == "$SHAI_VERSION" &&
    "$(dpkg-deb --field "$work/$PACKAGE" Architecture)" == amd64 ]] || {
     printf 'DEB package identity, version or architecture does not match the release.\n' >&2; exit 1;
 }
-printf 'Verified pinned SHA-256, signed workflow provenance and DEB identity for %s.\n' "$PACKAGE"
+printf 'Verified pinned SHA-256, signed release validation and DEB identity for %s.\n' "$PACKAGE"
 if $verify_only; then
     printf 'Verification complete. No software installed or Setup launched.\n'; exit 0;
 fi
