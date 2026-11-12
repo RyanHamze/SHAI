@@ -1,14 +1,27 @@
 # SHAI
 
-**Smart Home Automation and AI** for an existing Ubuntu Desktop installation.
-Ubuntu remains your operating system. SHAI is not an OS, distribution, ISO or
-replacement shell. SHAI and Aabey LLC are not affiliated with or endorsed by
-Canonical. Ubuntu is a trademark of Canonical Ltd.
+**Smart Home Automation and AI**
 
-## Install
+SHAI is an installer add-on for a computer that already runs Ubuntu Desktop.
+It helps repurpose that computer as a local smart-home and AI hub: choose your
+apps, manage local AI and monitor the computer from SHAI's desktop tools.
+It does not install or replace Ubuntu. Ubuntu remains your operating system.
 
-Current public test release: **0.14.0**, Ubuntu Desktop 26.04, amd64.
-Back up your system before using Setup. In your normal desktop terminal:
+## Read Before Installing
+
+**Back up first. After you approve Setup, it can purge selected Ubuntu apps
+and their system configuration, change desktop/privacy/sharing settings, and
+switch scheduled updates to manual operation.** Review the displayed removal
+scope. Setup does not target your personal documents or media, but a backup is
+still essential. Uninstalling SHAI does not put removed apps or all settings back.
+
+Current public test release: **0.15.0**. You need **Ubuntu Desktop 26.04.x LTS
+on a 64-bit Intel/AMD PC (amd64)**. This package is not for ARM/Raspberry Pi or
+32-bit Ubuntu. Optional apps and AI models need additional resources and setup.
+
+## Install In Ubuntu Terminal
+
+Open Terminal on your Ubuntu desktop. Copy and run these lines in order:
 
 ```bash
 sudo apt install curl python3 ca-certificates
@@ -16,10 +29,20 @@ curl -fL https://raw.githubusercontent.com/RyanHamze/SHAI/main/install.sh -o sha
 bash shai-install.sh
 ```
 
-Inspect the downloaded script before running it. Do not run it with sudo or
-pipe a download into Bash. It verifies the pinned release before asking for
-administrator authentication. Installing the package does not debloat Ubuntu;
-Setup explains and requests approval for those changes separately.
+`sudo` asks for your Ubuntu administrator password. Type it and press Enter;
+password characters normally do not appear. The first line installs download
+tools and may ask you to confirm. The next lines download and run SHAI's installer.
+
+Internet is needed for this download, verification and any missing dependencies.
+No GitHub account is needed. You can inspect `shai-install.sh` before running it.
+Run it as your normal desktop user, not with `sudo bash`; it asks for administrator
+permission when required. Do not pipe a download straight into Bash.
+
+The installer verifies the pinned package and signed release-validation
+attestation, installs the platform, then opens SHAI Setup. **Installing alone
+does not approve cleanup.** Read Setup's choices and approve only when ready.
+If verification fails, stop; do not bypass it. Individual smart-home apps and
+models are selected later in SHAPP or AIA, not all preinstalled.
 
 [Installation and verification](docs/INSTALL_FROM_GITHUB.md) |
 [Using SHAI](docs/USER_GUIDE.md) |
@@ -39,6 +62,13 @@ Features vary with the installed release, hardware and optional software.
 Normal local operation is designed not to require cloud services; explicitly
 requested downloads and update verification require internet access. The
 browser proxy toggle is not a host-wide firewall or physical air gap.
+When scheduled updates are disabled, you must check and apply security updates
+manually using SHAPP or Ubuntu's tools.
+
+SHAI and Aabey LLC are not affiliated with or endorsed by Canonical. Ubuntu is
+a trademark of Canonical Ltd. SHAI is not an OS, distribution, ISO or replacement
+shell. For detailed app instructions and limitations, read the
+[SHAI User Manual](docs/USER_GUIDE.md).
 
 ## Distribution Repository
 
