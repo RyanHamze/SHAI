@@ -143,11 +143,27 @@ and terms; no blanket open-source license or publisher endorsement is implied.
 
 ## SHAPP app credits and sources
 
+SHEALTH's offline currency list uses the
+[SIX ISO 4217 currency list](https://www.six-group.com/en/products-services/financial-information/market-reference-data/data-standards.html),
+with symbols from [Babel](https://babel.pocoo.org/) and
+[Unicode CLDR](https://cldr.unicode.org/). Babel BSD and Unicode license texts
+are included in the installed package at
+`/usr/share/doc/shai-installer/licenses/`. This selection does not perform
+exchange-rate lookups or currency conversion.
+
 The non-affiliation statement above applies to **each row individually**.
 Project links credit the respective maintainers and contributors.
 
 | Catalog ID | Project / contributors | Actual configured source or limitation |
 | --- | --- | --- |
+| `system-bridge` | [System Bridge / Timmo and contributors](https://github.com/timmo001/system-bridge) | Official 5.28.5 amd64 DEB, published SHA-256 verified; pairing and command permissions are configured separately. |
+| `go-hass-agent` | [Go Hass Agent / Joshua Rich and contributors](https://github.com/joshuar/go-hass-agent) | Official v14.19.0 amd64/arm64 DEB with published SHA-256; independent Linux alternative, not Windows HASS.Agent. |
+| `glances` | [Glances contributors](https://github.com/nicolargo/glances) | Ubuntu APT `glances`; newly installed network service kept disabled until configured. |
+| `nut` | [Network UPS Tools contributors](https://networkupstools.org/) | Ubuntu APT `nut`; supported UPS and driver configuration required. |
+| `btop` | [btop / aristocratos and contributors](https://github.com/aristocratos/btop) | Ubuntu APT `btop`; on-demand terminal monitor. |
+| `nvtop` | [nvtop contributors](https://github.com/Syllo/nvtop) | Ubuntu APT `nvtop`; GPU power and other counters depend on the driver and hardware. |
+| `powerjoular` | [PowerJoular / Joular contributors](https://github.com/joular/powerjoular) | Official stable 1.1.1 amd64/arm64 DEB with published SHA-256; avoids the 2.0 beta. Supported counters and permissions required. |
+| `mangohud` | [MangoHud contributors](https://github.com/flightlessmango/MangoHud) | Ubuntu APT `mangohud`; no global overlay or telemetry upload enabled by SHAI. |
 | `vnstat` | [vnStat](https://github.com/vergoh/vnstat) | APT: `vnstat`. |
 | `nethogs` | [NetHogs](https://github.com/raboof/nethogs) | APT: `nethogs`. |
 | `exiftool` | [ExifTool / Phil Harvey and contributors](https://exiftool.org/) | APT: `libimage-exiftool-perl`; Metadata Cleaner is SHAI's separate frontend. |
