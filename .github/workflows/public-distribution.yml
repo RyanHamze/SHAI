@@ -1,5 +1,17 @@
 name: Public distribution policy
-on: [push, pull_request]
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Exact release version to validate'
+        required: true
+        type: string
+      sha256:
+        description: 'Independently verified package SHA-256'
+        required: true
+        type: string
 permissions:
   contents: read
 jobs:
@@ -34,3 +46,102 @@ jobs:
                       assert (path.parent / target.split('#')[0]).exists(), f'Broken link in {name}: {target}'
           print('Public distribution allowlist and links passed')
           PY
+  attest-release:
+    if: github.event_name == 'workflow_dispatch'
+    needs: public-files
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
+    env:
+      VERSION: ${{ inputs.version }}
+      EXPECTED_SHA256: ${{ inputs.sha256 }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+      - name: Download exact draft candidate
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          [[ "$EXPECTED_SHA256" =~ ^[a-f0-9]{64}$ ]]
+          [[ "$GITHUB_REF" == "refs/tags/v$VERSION" ]]
+          [[ "$(gh release view "v$VERSION" --repo "$GITHUB_REPOSITORY" --json isDraft --jq .isDraft)" == true ]]
+          mkdir candidate
+          gh release download "v$VERSION" --repo "$GITHUB_REPOSITORY" --dir candidate \
+            --pattern "shai-installer_${VERSION}_amd64.deb" \
+            --pattern SHA256SUMS --pattern SHAI-APP-CATALOG.json
+      - name: Validate package without installation or execution
+        run: |
+          python3 - <<'PY'
+          import hashlib, io, json, os, pathlib, re, subprocess, tarfile
+          root = pathlib.Path('candidate')
+          version = os.environ['VERSION']
+          name = f'shai-installer_{version}_amd64.deb'
+          deb = root / name
+          assert deb.is_file() and deb.stat().st_size <= 67108864
+          digest = hashlib.sha256(deb.read_bytes()).hexdigest()
+          assert digest == os.environ['EXPECTED_SHA256'], 'Candidate digest mismatch'
+          for field, expected in [('Package','shai-installer'),('Version',version),('Architecture','amd64')]:
+              assert subprocess.check_output(['dpkg-deb','-f',str(deb),field],text=True).strip() == expected
+          controls = subprocess.check_output(['dpkg-deb','--ctrl-tarfile',str(deb)])
+          with tarfile.open(fileobj=io.BytesIO(controls)) as archive:
+              names = {item.name.removeprefix('./') for item in archive if item.isfile()}
+              assert names == {'control','prerm'}, 'Unexpected install-time maintainer scripts'
+          manifests = {}
+          for line in (root / 'SHA256SUMS').read_text().splitlines():
+              checksum, filename = line.split('  ',1)
+              assert filename in {name,'SHAI-APP-CATALOG.json'} and filename not in manifests
+              assert re.fullmatch('[a-f0-9]{64}', checksum)
+              assert hashlib.sha256((root / filename).read_bytes()).hexdigest() == checksum
+              manifests[filename] = checksum
+          assert set(manifests) == {name,'SHAI-APP-CATALOG.json'}
+          catalog = json.loads((root / 'SHAI-APP-CATALOG.json').read_text())
+          payload = subprocess.check_output(['dpkg-deb','--fsys-tarfile',str(deb)])
+          assert len(payload) <= 134217728
+          with tarfile.open(fileobj=io.BytesIO(payload)) as archive:
+              members = {item.name.removeprefix('./'): item for item in archive}
+              for path, item in members.items():
+                  assert not any(part in {'.git','.rose','.codex','private','tests','tools','release'} for part in pathlib.PurePosixPath(path).parts)
+                  assert not re.search(r'(?:START_HERE|AGENTS|_AUDIT|_PLAN)\.md$',path,re.I)
+                  assert not item.mode & 0o002, 'World-writable payload'
+                  if item.isfile() and item.size <= 2097152:
+                      text = archive.extractfile(item).read().decode('utf-8',errors='replace')
+                      assert not re.search(r'-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----',text)
+                      assert not re.search(r'/mnt/[a-z]/[Uu]sers/|[A-Za-z]:\\Users\\',text)
+              for app in catalog['applications']:
+                  assert app['version'] == version
+                  if 'package_path' in app:
+                      item = members[app['package_path'].lstrip('/')]
+                      assert item.isfile()
+                      assert hashlib.sha256(archive.extractfile(item).read()).hexdigest() == app['sha256']
+                  else:
+                      assert app['artifact'] == name and app['sha256'] == digest
+          predicate = {'schemaVersion':1,'version':version,'tag':'v'+version,
+                       'repository':os.environ['GITHUB_REPOSITORY'],
+                       'workflowCommit':os.environ['GITHUB_SHA'],
+                       'checks':['sha256','deb-identity','inert-install-controls','catalog-app-hashes','public-payload-policy'],
+                       'claim':'Release artifact validation only; not public source-build provenance or publisher APT signing.'}
+          pathlib.Path('validation.json').write_text(json.dumps(predicate))
+          print('Candidate package, catalog, checksums and public payload policy passed. No package code executed.')
+          PY
+      - name: Attest validated release assets
+        id: attest
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6
+        with:
+          subject-path: |
+            candidate/shai-installer_${{ inputs.version }}_amd64.deb
+            candidate/SHA256SUMS
+            candidate/SHAI-APP-CATALOG.json
+          predicate-type: https://aabeyllc.com/shai/release-validation/v1
+          predicate-path: validation.json
+      - name: Attach verification bundle to draft
+        env:
+          BUNDLE_PATH: ${{ steps.attest.outputs.bundle-path }}
+        run: |
+          set -euo pipefail
+          [[ "$(gh release view "v$VERSION" --repo "$GITHUB_REPOSITORY" --json isDraft --jq .isDraft)" == true ]]
+          package="shai-installer_${VERSION}_amd64.deb"
+          install -m 0644 "$BUNDLE_PATH" "candidate/$package.intoto.jsonl"
+          gh release upload "v$VERSION" "candidate/$package.intoto.jsonl" --repo "$GITHUB_REPOSITORY" --clobber
