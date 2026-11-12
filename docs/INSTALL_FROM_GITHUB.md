@@ -1,6 +1,6 @@
 # Install and verify SHAI
 
-Target: Ubuntu Desktop 26.04.x LTS, amd64. Public release **0.14.0** requires
+Target: Ubuntu Desktop 26.04.x LTS, amd64. Public release **0.15.0** requires
 no GitHub account, token or Git checkout. Back up your system first.
 
 ## Open Setup
@@ -29,17 +29,21 @@ The entry point downloads a fixed release DEB and its attestation bundle over
 HTTPS, then verifies:
 
 - The exact pinned package SHA-256.
-- Signed GitHub provenance for `RyanHamze/SHAI`, the recorded release-build
-  workflow, release tag and exact source digest, rejecting self-hosted runners.
+- A signed release-validation attestation for `RyanHamze/SHAI`, its recorded
+  validation workflow and exact commit, release tag and required checks,
+  rejecting self-hosted runners. A mismatched signed policy also stops install.
 - Package name, version and amd64 architecture.
 
 The current workflow identity is
-`RyanHamze/SHAI/.github/workflows/build-attest-release.yml`; it identifies the
-historical signed release build, not a requirement that development files
-remain in the current public tree. See
+`RyanHamze/SHAI/.github/workflows/public-distribution.yml`, pinned to
+`b164483ae0690abfeb7c380386073827fa3172d0` for this release. The custom predicate
+is `https://aabeyllc.com/shai/release-validation/v1`. It confirms package
+identity, checksum, inert install controls, application hashes and public
+payload checks. It does not claim a public-source build or independent source
+review. See
 [GitHub's verification reference](https://cli.github.com/manual/gh_attestation_verify).
 Offline bundle verification cannot detect later repository/owner name reuse;
-the independent artifact/source pins remain required.
+the independent artifact and workflow-commit pins remain required.
 
 If the installed GitHub CLI cannot verify the bundle, the script downloads a
 fixed official portable CLI, verifies its pinned hash and uses it temporarily.
@@ -56,10 +60,10 @@ process. Do not disable the checks or substitute an unpinned package.
 
 ## Current public artifact
 
-- File: `shai-installer_0.14.0_amd64.deb`.
-- SHA-256: `3a9fa6c11ff5598cf53b0574ef83e19383b9cb5977d01813dd905efe70f784d9`.
-- Public attestation sidecar: `shai-installer_0.14.0_amd64.deb.intoto.jsonl`.
-- [Release downloads](https://github.com/RyanHamze/SHAI/releases/tag/v0.14.0).
+- File: `shai-installer_0.15.0_amd64.deb`.
+- SHA-256: `d0865636ae24c3d3fc63271e60e9e26db8e3fff1b2d7b2769faec0b6868112e5`.
+- Public attestation sidecar: `shai-installer_0.15.0_amd64.deb.intoto.jsonl`.
+- [Release downloads](https://github.com/RyanHamze/SHAI/releases/tag/v0.15.0).
 
 This is a test release, not a claim of universal hardware support or
 publisher-GPG-signed APT metadata. See [Security](../SECURITY.md).
