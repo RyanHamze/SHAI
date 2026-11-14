@@ -1,6 +1,6 @@
 # SHAI User Manual
 
-For SHAI 0.16.0 test release on Ubuntu Desktop 26.04.x LTS, 64-bit amd64.
+For SHAI 0.16.1 test release on Ubuntu Desktop 26.04.x LTS, 64-bit amd64.
 SHAI adds local smart-home and AI tools; Ubuntu remains your operating system.
 This is test software. Back up before applying Setup or changing applications.
 
