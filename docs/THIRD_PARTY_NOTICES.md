@@ -238,3 +238,28 @@ copyright notices, corresponding source or additional permissions. Before a
 release, review the actual artifact and its dependencies, retain required
 licenses/source information and resolve unclear code/artwork provenance.
 Credits and non-affiliation language do not discharge those obligations.
+
+## Additional Optional Software And Icons
+
+SHAI is not affiliated with these projects or VPN providers. Installation routes
+download from the publishers or authenticated Ubuntu repositories; installing
+them does not transfer their copyright, trademark rights or support to SHAI.
+
+| Software | Publisher/source | Route and notes |
+| --- | --- | --- |
+| Portainer CE | [Portainer](https://github.com/portainer/portainer) | Official CE LTS image, local Docker socket administration; original icon from the publisher asset CDN. |
+| Proton VPN | [Proton](https://protonvpn.com/support/linux-vpn-debian-ubuntu) | Official signed APT repository; account/internet required. |
+| hide.me | [Official Linux client](https://github.com/eventure/hide.client.linux) | Verified release CLI; provider account and separate privileged activation required. |
+| Jellyfin | [Jellyfin](https://jellyfin.org/docs/general/installation/linux/) | Signed Ubuntu LTS repository or existing container route. |
+| Navidrome | [Navidrome](https://github.com/navidrome/navidrome) | Official architecture-specific release or existing container route. |
+| Immich | [Immich](https://github.com/immich-app/immich) | Official checksummed Compose release, independent project; AGPL-3.0 terms apply upstream. |
+| Calibre-Web | [Calibre-Web](https://github.com/janeczku/calibre-web) | Official PyPI distribution and verified dependency wheels. |
+| qBittorrent | [qBittorrent](https://github.com/qbittorrent/qBittorrent) | Ubuntu package; no transfers started by installation. |
+| Transmission | [Transmission](https://github.com/transmission/transmission) | Ubuntu GTK package, not an enabled remote daemon. |
+| uv | [Astral uv](https://github.com/astral-sh/uv) | Verified official release for isolated supported Python runtimes. |
+| Node.js | [Node.js](https://nodejs.org/) | Official checksummed runtime for the experimental Gladys route; does not replace system Node. |
+
+Open WebUI, Home Assistant and Gladys launchers use unmodified publisher icons.
+Icons and project names identify the application being launched; they are not
+public-domain SHAI artwork or a claim of endorsement. Source URLs are retained
+in the installed Web-App-Icons notice. Upstream branding and license terms apply.

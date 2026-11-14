@@ -7,6 +7,19 @@ It helps repurpose that computer as a local smart-home and AI hub: choose your
 apps, manage local AI and monitor the computer from SHAI's desktop tools.
 It does not install or replace Ubuntu. Ubuntu remains your operating system.
 
+### Individual Apps
+
+You can install AIA, SHEALTH, SHAPP or Metadata Cleaner without applying Setup,
+debloating Ubuntu or changing your theme. Download the same installer, then use
+`bash install.sh --app aia`, `--app health`, `--app shapp` or `--app metadata`.
+The installer verifies the published release first and asks for sudo when needed.
+`--app setup` installs Setup alone; no changes are applied until you approve them.
+
+After installation, the desktop SHAI folder contains your app launchers. Missing
+apps have an Install entry. Removing AIA preserves shared model files, security
+keys, integrations and Open WebUI. Its optional app-only cleanup clears chat and
+resets UI preferences, not shared configuration.
+
 ## Read Before Installing
 
 **Back up first. After you approve Setup, it can purge selected Ubuntu apps

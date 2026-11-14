@@ -1,8 +1,33 @@
 # SHAI User Manual
 
-For SHAI 0.15.0 on Ubuntu Desktop 26.04.x LTS, 64-bit amd64.
+For SHAI 0.16.0 test release on Ubuntu Desktop 26.04.x LTS, 64-bit amd64.
 SHAI adds local smart-home and AI tools; Ubuntu remains your operating system.
 This is test software. Back up before applying Setup or changing applications.
+
+## Application And Service Choices
+
+- Home Assistant is offered under SHAPP Architecture as a Docker installation.
+  Native Home Assistant Core installation is not offered.
+- Open WebUI has separate native and Docker routes. Do not install both on port
+  3000. Existing data and containers are never automatically migrated.
+- Native Gladys is experimental, core-only; Docker-managed integrations are not
+  available in that route. Use Docker when those integrations are needed.
+- Immich uses its own Compose project and requires at least 6 GB host RAM.
+  It does not replace the existing SHAI containers or Portainer configuration.
+- VPN clients require provider accounts, internet and explicit connection setup.
+  Installing a VPN client does not establish protection. hide.me's client is
+  staged without privileged route/DNS changes; activation requires review.
+- Jellyfin, Navidrome and Calibre-Web need library and account configuration.
+  Resource figures are planning estimates; media and databases need extra space.
+- qBittorrent and Transmission are native Ubuntu torrent options. A maintained,
+  verified Ubuntu 26 installer for legacy microTorrent is not provided.
+
+SHEALTH Status shows the host services; Docker has container health, local links
+and confirmed actions. The header refresh icon updates readings manually while
+background sampling continues. Stop/Kill/Remove are not read-only operations.
+Portainer's setup-key button is shown only when initial admin setup is required.
+The web toggle controls proxy-aware browsing, not all network access or an air gap.
+Browser shortcuts follow your default browser rather than forcing Firefox.
 
 [Install SHAI](INSTALL_FROM_GITHUB.md) | [Security](../SECURITY.md) |
 [Component credits](THIRD_PARTY_NOTICES.md) | [Home](../README.md)

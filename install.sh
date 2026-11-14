@@ -19,13 +19,15 @@ readonly GH_SHA256=4c806978ffce1cec70853302a56d70ac6da4f19bae7adca4e1a8ab00633dd
 readonly GH_URL="https://github.com/cli/cli/releases/download/v${GH_VERSION}/$GH_ARCHIVE"
 
 verify_only=false
+app=all
 case "${1:-}" in
     '') ;;
     --verify-only) verify_only=true ;;
-    --help) printf 'Usage: bash install.sh [--verify-only]\nVerifies the public SHAI release before installation and opens Setup as your desktop user.\n'; exit 0 ;;
+    --app) app="${2:-}"; [[ "$app" =~ ^(all|aia|health|shapp|metadata|setup)$ ]] || { echo 'Choose all, aia, health, shapp, metadata or setup'; exit 2; } ;;
+    --help) printf 'Usage: bash install.sh [--verify-only | --app all|setup|aia|health|shapp|metadata]\nVerifies the release before installation. Standalone apps do not run debloat or change your theme.\n'; exit 0 ;;
     *) printf 'Unknown option: %s\n' "$1" >&2; exit 2 ;;
 esac
-[[ $# -le 1 ]] || { printf 'Too many arguments.\n' >&2; exit 2; }
+[[ $# -le 1 || ( $# -eq 2 && "$1" == --app ) ]] || { printf 'Too many arguments.\n' >&2; exit 2; }
 [[ $EUID -ne 0 ]] || { printf 'Run as your desktop user, without sudo. Installation will ask for sudo separately.\n' >&2; exit 1; }
 for command in curl python3 sha256sum dpkg-deb dpkg mktemp chmod mkdir stat rm; do
     command -v "$command" >/dev/null || {
@@ -178,6 +180,26 @@ if $verify_only; then
 fi
 printf 'Installing the platform only. APT may contact Ubuntu for missing dependencies.\n'
 printf 'Debloat, theming and appliance changes require your approval inside SHAI Setup.\n'
-sudo apt-get --no-remove --no-install-recommends -y install "$work/$PACKAGE"
-printf 'Opening SHAI Setup as your desktop user.\n'
-/usr/bin/shai-setup
+dpkg-deb -x "$work/$PACKAGE" "$work/component-source"
+if [[ ! -f "$work/component-source/usr/lib/shai-installer/shai-component-build" ]]; then
+    [[ "$app" == all ]] || { echo 'The currently published release does not yet provide standalone packages.'; exit 1; }
+    sudo apt-get --no-remove --no-install-recommends -y install "$work/$PACKAGE"
+    exec /usr/bin/shai-setup
+fi
+python3 "$work/component-source/usr/lib/shai-installer/shai-component-build" "$work/$PACKAGE" "$work/components" --app "$app"
+sudo apt-get --no-remove --no-install-recommends -y install "$work"/components/*.deb
+sudo apt-mark manual shai-runtime
+if [[ "$app" == all || "$app" == health ]]; then
+    sudo systemd-tmpfiles --create /usr/lib/tmpfiles.d/shai-network.conf
+    sudo systemctl enable --now shai-network-snapshot.timer
+fi
+/usr/lib/shai-installer/shai-folder-sync
+systemctl --user daemon-reload
+systemctl --user enable --now shai-folder-sync.timer
+case "$app" in
+    all|setup) /usr/bin/shai-setup ;;
+    aia) /usr/bin/shai-aia ;;
+    health) /usr/bin/shai-health ;;
+    shapp) /usr/bin/shai-shapp ;;
+    metadata) /usr/bin/shai-metadata ;;
+esac
