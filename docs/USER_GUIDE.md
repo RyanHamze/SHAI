@@ -153,9 +153,9 @@ not a complete packet audit or guaranteed bandwidth attribution. Missing data
 is not zero traffic. The Sniffnet panel launches advanced monitoring or opens
 SHAPP with an online-install warning if it is missing.
 
-Uptime shows host boot time, uptime, firewall status, detected services and
+Status shows host boot time, uptime, firewall status, detected services and
 available active durations. SSH, HA, MQTT, Docker and supported services appear
-where detected. Container details live here when available. No matching unit
+where detected. Container details and confirmed actions live in Docker. No matching unit
 does not prove an app is absent: manual processes, remote installations and
 inaccessible status may not be assessed.
 
@@ -172,7 +172,7 @@ Changing currency does not convert the price or historical costs: enter the
 correct local rate yourself. The CPU-utilization model is an estimate, not a
 physical meter or complete carbon-footprint calculation.
 
-Energy opens PowerJoular/nvtop in SHAPP without selecting or installing them.
+Energy recommends going to the shop and installing PowerJoular and nvtop there.
 For home devices, use Home Assistant's Energy Dashboard with compatible energy
 sensors. When a local HA service/container is detected, its local Energy link
 appears. Detection does not prove the service is running or energy sources are

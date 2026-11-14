@@ -28,7 +28,7 @@ switch scheduled updates to manual operation.** Review the displayed removal
 scope. Setup does not target your personal documents or media, but a backup is
 still essential. Uninstalling SHAI does not put removed apps or all settings back.
 
-Current public test release: **0.15.0**. You need **Ubuntu Desktop 26.04.x LTS
+Current public test release: **0.16.0**. You need **Ubuntu Desktop 26.04.x LTS
 on a 64-bit Intel/AMD PC (amd64)**. This package is not for ARM/Raspberry Pi or
 32-bit Ubuntu. Optional apps and AI models need additional resources and setup.
 
