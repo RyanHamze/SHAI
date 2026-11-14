@@ -1,6 +1,6 @@
 # Install and verify SHAI
 
-Target: Ubuntu Desktop 26.04.x LTS, amd64. Public release **0.16.1** requires
+Target: Ubuntu Desktop 26.04.x LTS, amd64. Public release **0.16.2** requires
 no GitHub account, token or Git checkout. Back up your system first.
 
 ## Open Setup
@@ -36,7 +36,7 @@ HTTPS, then verifies:
 
 The current workflow identity is
 `RyanHamze/SHAI/.github/workflows/public-distribution.yml`, pinned to
-`7ff54474718ea7d8ef7fb2b62f13a50b91d72a52` for this release. The custom predicate
+`f3367961a5069f254031afd96194502e713726e7` for this release. The custom predicate
 is `https://aabeyllc.com/shai/release-validation/v1`. It confirms package
 identity, checksum, inert install controls, application hashes and public
 payload checks. It does not claim a public-source build or independent source
@@ -60,10 +60,10 @@ process. Do not disable the checks or substitute an unpinned package.
 
 ## Current public artifact
 
-- File: `shai-installer_0.16.1_amd64.deb`.
-- SHA-256: `526f3fef3109259424481df4e21981a41b842b4f41a39a5095e09611333673d0`.
-- Public attestation sidecar: `shai-installer_0.16.1_amd64.deb.intoto.jsonl`.
-- [Release downloads](https://github.com/RyanHamze/SHAI/releases/tag/v0.16.1).
+- File: `shai-installer_0.16.2_amd64.deb`.
+- SHA-256: `3f7537381eae96a0d3ff8198a8b01239e5a67f274d7716254426cf71432908a2`.
+- Public attestation sidecar: `shai-installer_0.16.2_amd64.deb.intoto.jsonl`.
+- [Release downloads](https://github.com/RyanHamze/SHAI/releases/tag/v0.16.2).
 
 This is a test release, not a claim of universal hardware support or
 publisher-GPG-signed APT metadata. See [Security](../SECURITY.md).

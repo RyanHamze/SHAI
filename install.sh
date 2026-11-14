@@ -3,11 +3,11 @@
 set +x
 set -Eeuo pipefail
 
-readonly SHAI_VERSION=0.16.1
+readonly SHAI_VERSION=0.16.2
 readonly PACKAGE="shai-installer_${SHAI_VERSION}_amd64.deb"
 # Independent release pins; never substitute downloaded checksum metadata.
-readonly SHA256=526f3fef3109259424481df4e21981a41b842b4f41a39a5095e09611333673d0
-readonly SOURCE_COMMIT=7ff54474718ea7d8ef7fb2b62f13a50b91d72a52
+readonly SHA256=3f7537381eae96a0d3ff8198a8b01239e5a67f274d7716254426cf71432908a2
+readonly SOURCE_COMMIT=f3367961a5069f254031afd96194502e713726e7
 readonly VALIDATION_TYPE=https://aabeyllc.com/shai/release-validation/v1
 readonly SOURCE_REF="refs/tags/v${SHAI_VERSION}"
 readonly RELEASE_URL="https://github.com/RyanHamze/SHAI/releases/download/v${SHAI_VERSION}"
@@ -189,6 +189,9 @@ fi
 python3 "$work/component-source/usr/lib/shai-installer/shai-component-build" "$work/$PACKAGE" "$work/components" --app "$app"
 sudo apt-get --no-remove --no-install-recommends -y install "$work"/components/*.deb
 sudo apt-mark manual shai-runtime
+if [[ -f /var/lib/shai/stack/installed.json ]]; then
+    sudo /usr/lib/shai-installer/shai-local-access --sync
+fi
 if [[ "$app" == all || "$app" == health ]]; then
     sudo systemd-tmpfiles --create /usr/lib/tmpfiles.d/shai-network.conf
     sudo systemctl enable --now shai-network-snapshot.timer

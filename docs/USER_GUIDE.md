@@ -1,6 +1,6 @@
 # SHAI User Manual
 
-For SHAI 0.16.1 test release on Ubuntu Desktop 26.04.x LTS, 64-bit amd64.
+For SHAI 0.16.2 test release on Ubuntu Desktop 26.04.x LTS, 64-bit amd64.
 SHAI adds local smart-home and AI tools; Ubuntu remains your operating system.
 This is test software. Back up before applying Setup or changing applications.
 
@@ -28,6 +28,25 @@ background sampling continues. Stop/Kill/Remove are not read-only operations.
 Portainer's setup-key button is shown only when initial admin setup is required.
 The web toggle controls proxy-aware browsing, not all network access or an air gap.
 Browser shortcuts follow your default browser rather than forcing Firefox.
+
+### Isolated Docker App Access
+
+For managed isolated containers, SHAI automatically creates local-only systemd
+socket forwarding when the app is installed, including Zigbee2MQTT's dashboard.
+Use the desktop shortcut or the URL shown in SHEALTH, not a changing container IP.
+This keeps the internal Docker bridge isolated; it does not enable internet access,
+change the browsing proxy toggle or expose the application on the home LAN.
+The forwarding sockets start at boot and are removed with the managed app.
+SHEALTH's Network tab shows Docker bridge isolation/subnets, attached containers,
+and each forwarding socket's status, startup setting and clickable local URL.
+An active forwarding socket is not proof that the application behind it is healthy.
+The underlying Ubuntu component is
+[systemd-socket-proxyd](https://www.freedesktop.org/software/systemd/man/latest/systemd-socket-proxyd.html).
+
+Proton VPN is an Optional install. Docker-only SHAI installer routes live under
+Architecture; this does not imply upstream projects lack other installation methods.
+Installed GUI apps get desktop launchers; command-line and headless tools may get
+a terminal-help or configuration shortcut instead of a graphical application window.
 
 [Install SHAI](INSTALL_FROM_GITHUB.md) | [Security](../SECURITY.md) |
 [Component credits](THIRD_PARTY_NOTICES.md) | [Home](../README.md)
