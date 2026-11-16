@@ -23,6 +23,26 @@ To verify without installation or opening Setup:
 bash shai-install.sh --verify-only
 ```
 
+## Individual Apps
+
+Use `bash shai-install.sh --app aia`, `--app health`, `--app shapp`,
+`--app metadata` or `--app setup` to select a component instead of the full set.
+Each selection still verifies the pinned release before requesting installation.
+Installation alone does not approve debloat, theming or network-policy changes.
+
+For the forthcoming 0.17.0 release, `bash shai-install.sh --app shdef` selects
+SHDef alone, without Setup or the shared SHAI runtime. It opens SHDef as your
+desktop user; changing levels or saving commands requires separate local
+administrator approval. Setup selection in that release also includes the
+independently removable SHDef component.
+Installation configures SHDef's read-only status socket, not a protection level;
+it does not approve or execute the configured layer commands. The collector
+listens only on a local Unix socket (AF_UNIX), not a TCP port.
+
+The bootstrap is still pinned to 0.16.2, which does not contain SHDef. Selecting
+SHDef currently stops without installing a package. The 0.17.0 download is not
+available through this installer until its package and validation pins are final.
+
 ## What is verified
 
 The entry point downloads a fixed release DEB and its attestation bundle over
@@ -42,6 +62,9 @@ identity, checksum, inert install controls, application hashes and public
 payload checks. It does not claim a public-source build or independent source
 review. See
 [GitHub's verification reference](https://cli.github.com/manual/gh_attestation_verify).
+For 0.17.0, the retained `inert-install-controls` check name permits exactly
+reviewed, hash-pinned read-only socket lifecycle scripts. Starting this status
+socket does not apply a security profile, run layer commands or perform debloat.
 Offline bundle verification cannot detect later repository/owner name reuse;
 the independent artifact and workflow-commit pins remain required.
 

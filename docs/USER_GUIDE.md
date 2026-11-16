@@ -3,6 +3,8 @@
 For SHAI 0.16.2 test release on Ubuntu Desktop 26.04.x LTS, 64-bit amd64.
 SHAI adds local smart-home and AI tools; Ubuntu remains your operating system.
 This is test software. Back up before applying Setup or changing applications.
+Sections marked 0.17.0 describe the forthcoming release, not the currently pinned
+0.16.2 download. They do not certify live network-isolation or reconnect behavior.
 
 ## Application And Service Choices
 
@@ -17,6 +19,14 @@ This is test software. Back up before applying Setup or changing applications.
 - VPN clients require provider accounts, internet and explicit connection setup.
   Installing a VPN client does not establish protection. hide.me's client is
   staged without privileged route/DNS changes; activation requires review.
+  The 0.17.0 hide.me installer requires a foreground controlling terminal;
+  redirected output alone is not treated as evidence that a terminal is absent.
+- In 0.17.0, NetAlertX has a digest-pinned Docker route with a loopback-only web
+  interface and no published backend API. Automatic scans and online plugins
+  are disabled initially; owner configuration is required. Bridge mode does not
+  provide full LAN ARP discovery. The separate Home Assistant add-on entry opens
+  its repository-add page; it requires Supervisor, not Home Assistant Container,
+  and opening the page does not install or validate the add-on.
 - Jellyfin, Navidrome and Calibre-Web need library and account configuration.
   Resource figures are planning estimates; media and databases need extra space.
 - qBittorrent and Transmission are native Ubuntu torrent options. A maintained,
@@ -47,6 +57,8 @@ Proton VPN is an Optional install. Docker-only SHAI installer routes live under
 Architecture; this does not imply upstream projects lack other installation methods.
 Installed GUI apps get desktop launchers; command-line and headless tools may get
 a terminal-help or configuration shortcut instead of a graphical application window.
+In 0.17.0, generic fallback desktop shortcuts are no longer generated. Existing
+application-menu entries remain available. Metadata Cleaner has its own launcher.
 
 [Install SHAI](INSTALL_FROM_GITHUB.md) | [Security](../SECURITY.md) |
 [Component credits](THIRD_PARTY_NOTICES.md) | [Home](../README.md)
@@ -73,6 +85,8 @@ chat/media, printing, scanning, modem, domain-login, remote-desktop, help,
 dictionary and theme packages. Purging can delete those packages' system
 configuration files. Required Ubuntu desktop, login, networking, package-manager,
 accessibility, kernel and boot components are protected from SHAI removal.
+In 0.17.0, Vim's `vim-common`/`vim-tiny` packages and Ubuntu Language Support
+(`language-selector-gnome`) are explicitly protected as well.
 
 Setup applies approved theme, desktop, privacy and manual-update settings. This
 can disable notifications, location/reporting controls, sharing and scheduled
@@ -91,6 +105,59 @@ steps may have completed even when the overall operation failed.
 After success, open SHAPP from the completion screen. Setup stays in the app
 menu, but its completed desktop shortcut is removed. It does not open at every
 login. Installing the platform or merely opening Setup does not approve cleanup.
+
+## SHDef: Local Network Protection
+
+**Forthcoming in 0.17.0.** Install SHDef independently with `--app shdef`, or
+alongside Setup. Installing or opening it does not apply a protection level.
+Keep a recoverable backup and access to the computer's local console: network
+changes can terminate remote sessions. Live isolation and reconnect behavior
+are not certified for every host, device or network.
+
+Start at level 5, then select adjacent levels and review each requested change.
+Every approved transition applies layers 5 down to the selected target, followed
+by the standing commands. Selecting a less restrictive level does not replay an
+old configuration or automatically restore an earlier SSH setting. After reboot,
+previous protection is unverified and requires an explicit local reapply; do not
+assume boot-time protection or automatic recovery of terminated sessions.
+
+Configure uses the version 2 configuration format: the full commands for each
+layer are editable, not just extra commands after fixed built-ins. There is no
+separate SSH on/off toggle. Legacy standing commands are preserved read-only
+during migration and still run last; inspect them before approving a transition.
+A standing command that starts SSH is an intentional customization and can
+conflict with the selected protection profile. A running SSH service or an
+allowed firewall rule does not prove SSH is reachable when links are down or
+other isolation controls block traffic. Read customized-profile warnings.
+
+Refresh reads current status without sudo prompts through an authenticated,
+on-demand local Unix-socket systemd collector. Package installation enables its
+read-only status socket; this is not protection activation or automatic reapply.
+The collector does not change network policy or grant permission to execute
+commands. Saving configuration and changing levels
+still require separate local administrator approval. Saving does not execute the
+commands or apply the policy; reset affects only the unsaved editor.
+
+Layer commands run as root, unsandboxed, with a 60-second foreground timeout and
+a 4 MiB output limit. That limit is for captured output, not a general limit on
+files that root commands can write. Ordinary child process groups are cleaned
+up when execution ends, but root code can start services, daemonize, alter files
+or weaken protection. It cannot be fully contained, and arbitrary side effects
+cannot be reliably undone. Do not put secrets in scripts or captured output.
+
+Default built-in behavior preserves persistent UFW user rules, NetworkManager
+profiles/static-address settings and Docker bridge/IPAM configuration; temporary
+SHDef-owned nftables rules enforce isolation. Custom layer or standing commands
+can change those settings, so this is not a guarantee for edited configurations.
+Existing user firewall rules are not automatically removed just because a level
+changes. Runtime DHCP addresses and randomized Wi-Fi MAC addresses can change.
+Only interfaces/radios disabled by SHDef are candidates for its reenabling;
+previously user-disabled devices are not blindly brought online.
+
+Check current status, response details and the private last-state log after each
+approved action. A success exit code is not proof of complete network isolation,
+physical disconnection or remote reachability. SHDef and the browser proxy toggle
+are not certified physical air gaps. Keep local logs and configuration private.
 
 ## SHAPP: Apps And Updates
 
@@ -267,10 +334,15 @@ UI does not grant models access to every file, credential, command or device.
 
 ## Metadata, Connectivity And Removal
 
-Metadata Cleaner uses ExifTool. Review file selection, folder contents,
-recursive subfolders and backup options before approval. Original backups can
-retain sensitive metadata. Some formats/fields cannot be fully rewritten;
-keep backups and inspect the results.
+Metadata Cleaner uses ExifTool. Review file selection, folder contents and
+recursive subfolders before approval. In 0.17.0, cleaning targets recognized
+location, author, identifier, comment and edit-history fields while preserving
+original capture dates and rendering metadata. The approved operation writes
+in place without creating new `_original` backups; existing backups are not
+deleted and may retain sensitive metadata. Keep a separate safe copy first.
+Editing can invalidate digital signatures. This is not secure erasure: PDFs,
+proprietary fields or other retained data can still identify a device or place.
+Inspect the results; not every format or field can be fully rewritten.
 
 The desktop web/internet toggle changes proxy behavior for compatible clients.
 It is not a host-wide firewall, guaranteed network isolation or physical air gap.

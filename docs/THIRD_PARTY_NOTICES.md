@@ -248,6 +248,8 @@ them does not transfer their copyright, trademark rights or support to SHAI.
 | Software | Publisher/source | Route and notes |
 | --- | --- | --- |
 | Portainer CE | [Portainer](https://github.com/portainer/portainer) | Official CE LTS image, local Docker socket administration; original icon from the publisher asset CDN. |
+| NetAlertX (0.17.0) | [NetAlertX and contributors](https://github.com/netalertx/NetAlertX), [documentation](https://docs.netalertx.com/) | Digest-pinned `ghcr.io/netalertx/netalertx` image; bridge-mode inventory requires owner configuration. The image and its dependencies retain their own licenses/notices; SHAI does not claim authorship or full LAN discovery. |
+| NetAlertX Home Assistant add-on (0.17.0) | [alexbelgium/hassio-addons contributors](https://github.com/alexbelgium/hassio-addons/tree/master/netalertx) and NetAlertX upstream | Separate third-party Supervisor add-on repository. SHAI opens the repository-add page; it does not bundle the add-on or install Supervisor. Review that repository's and the exact add-on/image's license terms and notices. |
 | Proton VPN | [Proton](https://protonvpn.com/support/linux-vpn-debian-ubuntu) | Official signed APT repository; account/internet required. |
 | hide.me | [Official Linux client](https://github.com/eventure/hide.client.linux) | Verified release CLI; provider account and separate privileged activation required. |
 | Jellyfin | [Jellyfin](https://jellyfin.org/docs/general/installation/linux/) | Signed Ubuntu LTS repository or existing container route. |

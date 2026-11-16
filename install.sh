@@ -23,8 +23,8 @@ app=all
 case "${1:-}" in
     '') ;;
     --verify-only) verify_only=true ;;
-    --app) app="${2:-}"; [[ "$app" =~ ^(all|aia|health|shapp|metadata|setup)$ ]] || { echo 'Choose all, aia, health, shapp, metadata or setup'; exit 2; } ;;
-    --help) printf 'Usage: bash install.sh [--verify-only | --app all|setup|aia|health|shapp|metadata]\nVerifies the release before installation. Standalone apps do not run debloat or change your theme.\n'; exit 0 ;;
+    --app) app="${2:-}"; [[ "$app" =~ ^(all|aia|health|shapp|metadata|setup|shdef)$ ]] || { echo 'Choose all, aia, health, shapp, metadata, setup or shdef'; exit 2; } ;;
+    --help) printf 'Usage: bash install.sh [--verify-only | --app all|setup|aia|health|shapp|metadata|shdef]\nVerifies the release before installation. Standalone apps do not run debloat or change your theme. SHDef requires a release containing that component.\n'; exit 0 ;;
     *) printf 'Unknown option: %s\n' "$1" >&2; exit 2 ;;
 esac
 [[ $# -le 1 || ( $# -eq 2 && "$1" == --app ) ]] || { printf 'Too many arguments.\n' >&2; exit 2; }
@@ -181,6 +181,11 @@ fi
 printf 'Installing the platform only. APT may contact Ubuntu for missing dependencies.\n'
 printf 'Debloat, theming and appliance changes require your approval inside SHAI Setup.\n'
 dpkg-deb -x "$work/$PACKAGE" "$work/component-source"
+if [[ "$app" == shdef && ( ! -f "$work/component-source/usr/bin/shdef" ||
+    ! -f "$work/component-source/usr/lib/shdef/engine.py" ) ]]; then
+    printf 'The pinned release %s does not include SHDef. No package was installed.\n' "$SHAI_VERSION" >&2
+    exit 1
+fi
 if [[ ! -f "$work/component-source/usr/lib/shai-installer/shai-component-build" ]]; then
     [[ "$app" == all ]] || { echo 'The currently published release does not yet provide standalone packages.'; exit 1; }
     sudo apt-get --no-remove --no-install-recommends -y install "$work/$PACKAGE"
@@ -188,6 +193,9 @@ if [[ ! -f "$work/component-source/usr/lib/shai-installer/shai-component-build" 
 fi
 python3 "$work/component-source/usr/lib/shai-installer/shai-component-build" "$work/$PACKAGE" "$work/components" --app "$app"
 sudo apt-get --no-remove --no-install-recommends -y install "$work"/components/*.deb
+if [[ "$app" == shdef ]]; then
+    exec /usr/bin/shdef
+fi
 sudo apt-mark manual shai-runtime
 if [[ -f /var/lib/shai/stack/installed.json ]]; then
     sudo /usr/lib/shai-installer/shai-local-access --sync

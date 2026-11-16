@@ -88,7 +88,14 @@ jobs:
           controls = subprocess.check_output(['dpkg-deb','--ctrl-tarfile',str(deb)])
           with tarfile.open(fileobj=io.BytesIO(controls)) as archive:
               names = {item.name.removeprefix('./') for item in archive if item.isfile()}
-              assert names == {'control','prerm'}, 'Unexpected install-time maintainer scripts'
+              assert names == {'control','prerm','postinst','postrm'}, 'Unexpected install-time maintainer scripts'
+              approved_readonly_hooks = {
+                  'postinst': '4712e7d7598918552d1724893983fd55e558597c5eb2d8cbc1d881bd217795ae',
+                  'postrm': 'be86ceebe2ce27b93efdf4e771c79cc4477b43acca3cd9cfc005f3ec76fd7858',
+              }
+              for hook, expected in approved_readonly_hooks.items():
+                  member = next(item for item in archive if item.name.removeprefix('./') == hook)
+                  assert hashlib.sha256(archive.extractfile(member).read()).hexdigest() == expected, f'Unreviewed read-only monitor hook: {hook}'
           manifests = {}
           for line in (root / 'SHA256SUMS').read_text().splitlines():
               checksum, filename = line.split('  ',1)
