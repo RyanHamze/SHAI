@@ -16,7 +16,7 @@ The installer verifies the published release first and asks for sudo when needed
 `--app setup` installs Setup and, in 0.17.0, the independently removable SHDef
 component; no changes are applied until you approve them.
 
-### SHDef (0.17.0 Preview)
+### SHDef
 
 SHDef provides locally approved network-protection levels and editable commands
 for each layer. `bash install.sh --app shdef` installs it independently, without
@@ -24,8 +24,7 @@ the shared SHAI runtime or Setup. Installation and status refresh do not activat
 protection. Custom commands run as root and can weaken protection; review them
 and keep local console access. SHDef is not a certified air gap.
 See [SHDef in the user manual](docs/USER_GUIDE.md#shdef-local-network-protection).
-Release 0.17.0 is not yet published; the current pinned 0.16.2 package does not
-include SHDef, and the installer refuses that selection without installing it.
+SHDef is included in the 0.17.0 test prerelease.
 
 After installation, the desktop SHAI folder contains your app launchers. Missing
 apps have an Install entry. Removing AIA preserves shared model files, security
@@ -40,11 +39,9 @@ switch scheduled updates to manual operation.** Review the displayed removal
 scope. Setup does not target your personal documents or media, but a backup is
 still essential. Uninstalling SHAI does not put removed apps or all settings back.
 
-Current public test release: **0.16.2**. You need **Ubuntu Desktop 26.04.x LTS
+Current public test prerelease: **0.17.0**. You need **Ubuntu Desktop 26.04.x LTS
 on a 64-bit Intel/AMD PC (amd64)**. This package is not for ARM/Raspberry Pi or
 32-bit Ubuntu. Optional apps and AI models need additional resources and setup.
-Version **0.17.0 is in preparation**; the verified download remains 0.16.2 until
-the new package and validation pins are finalized.
 
 ## Install In Ubuntu Terminal
 

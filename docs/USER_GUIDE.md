@@ -1,10 +1,10 @@
 # SHAI User Manual
 
-For SHAI 0.16.2 test release on Ubuntu Desktop 26.04.x LTS, 64-bit amd64.
+For SHAI 0.17.0 test prerelease on Ubuntu Desktop 26.04.x LTS, 64-bit amd64.
 SHAI adds local smart-home and AI tools; Ubuntu remains your operating system.
 This is test software. Back up before applying Setup or changing applications.
-Sections marked 0.17.0 describe the forthcoming release, not the currently pinned
-0.16.2 download. They do not certify live network-isolation or reconnect behavior.
+This release does not certify live network-isolation or reconnect behavior
+across all supported hosts and devices.
 
 ## Application And Service Choices
 
@@ -108,7 +108,7 @@ login. Installing the platform or merely opening Setup does not approve cleanup.
 
 ## SHDef: Local Network Protection
 
-**Forthcoming in 0.17.0.** Install SHDef independently with `--app shdef`, or
+Install SHDef independently with `--app shdef`, or
 alongside Setup. Installing or opening it does not apply a protection level.
 Keep a recoverable backup and access to the computer's local console: network
 changes can terminate remote sessions. Live isolation and reconnect behavior

@@ -1,6 +1,6 @@
 # Install and verify SHAI
 
-Target: Ubuntu Desktop 26.04.x LTS, amd64. Public release **0.16.2** requires
+Target: Ubuntu Desktop 26.04.x LTS, amd64. Public test prerelease **0.17.0** requires
 no GitHub account, token or Git checkout. Back up your system first.
 
 ## Open Setup
@@ -30,7 +30,7 @@ Use `bash shai-install.sh --app aia`, `--app health`, `--app shapp`,
 Each selection still verifies the pinned release before requesting installation.
 Installation alone does not approve debloat, theming or network-policy changes.
 
-For the forthcoming 0.17.0 release, `bash shai-install.sh --app shdef` selects
+In 0.17.0, `bash shai-install.sh --app shdef` selects
 SHDef alone, without Setup or the shared SHAI runtime. It opens SHDef as your
 desktop user; changing levels or saving commands requires separate local
 administrator approval. Setup selection in that release also includes the
@@ -38,10 +38,6 @@ independently removable SHDef component.
 Installation configures SHDef's read-only status socket, not a protection level;
 it does not approve or execute the configured layer commands. The collector
 listens only on a local Unix socket (AF_UNIX), not a TCP port.
-
-The bootstrap is still pinned to 0.16.2, which does not contain SHDef. Selecting
-SHDef currently stops without installing a package. The 0.17.0 download is not
-available through this installer until its package and validation pins are final.
 
 ## What is verified
 
@@ -56,7 +52,7 @@ HTTPS, then verifies:
 
 The current workflow identity is
 `RyanHamze/SHAI/.github/workflows/public-distribution.yml`, pinned to
-`f3367961a5069f254031afd96194502e713726e7` for this release. The custom predicate
+`024e175cd9dbbed5976b0cd3f5e680e9546e4f58` for this release. The custom predicate
 is `https://aabeyllc.com/shai/release-validation/v1`. It confirms package
 identity, checksum, inert install controls, application hashes and public
 payload checks. It does not claim a public-source build or independent source
@@ -83,10 +79,10 @@ process. Do not disable the checks or substitute an unpinned package.
 
 ## Current public artifact
 
-- File: `shai-installer_0.16.2_amd64.deb`.
-- SHA-256: `3f7537381eae96a0d3ff8198a8b01239e5a67f274d7716254426cf71432908a2`.
-- Public attestation sidecar: `shai-installer_0.16.2_amd64.deb.intoto.jsonl`.
-- [Release downloads](https://github.com/RyanHamze/SHAI/releases/tag/v0.16.2).
+- File: `shai-installer_0.17.0_amd64.deb`.
+- SHA-256: `028724c67b447b77e42a1967f39fcc08524721456570067554cf99b803912b24`.
+- Public attestation sidecar: `shai-installer_0.17.0_amd64.deb.intoto.jsonl`.
+- [Release downloads](https://github.com/RyanHamze/SHAI/releases/tag/v0.17.0).
 
-This is a test release, not a claim of universal hardware support or
+This is a test prerelease, not a claim of universal hardware support or
 publisher-GPG-signed APT metadata. See [Security](../SECURITY.md).

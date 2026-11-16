@@ -3,11 +3,11 @@
 set +x
 set -Eeuo pipefail
 
-readonly SHAI_VERSION=0.16.2
+readonly SHAI_VERSION=0.17.0
 readonly PACKAGE="shai-installer_${SHAI_VERSION}_amd64.deb"
 # Independent release pins; never substitute downloaded checksum metadata.
-readonly SHA256=3f7537381eae96a0d3ff8198a8b01239e5a67f274d7716254426cf71432908a2
-readonly SOURCE_COMMIT=f3367961a5069f254031afd96194502e713726e7
+readonly SHA256=028724c67b447b77e42a1967f39fcc08524721456570067554cf99b803912b24
+readonly SOURCE_COMMIT=024e175cd9dbbed5976b0cd3f5e680e9546e4f58
 readonly VALIDATION_TYPE=https://aabeyllc.com/shai/release-validation/v1
 readonly SOURCE_REF="refs/tags/v${SHAI_VERSION}"
 readonly RELEASE_URL="https://github.com/RyanHamze/SHAI/releases/download/v${SHAI_VERSION}"
