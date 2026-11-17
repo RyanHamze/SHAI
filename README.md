@@ -1,6 +1,11 @@
 # SHAI
 
+<p><img src="assets/shai-logo.svg" alt="SHAI" width="240"></p>
+
 **Smart Home Automation and AI**
+
+[User Guide](docs/USER_GUIDE.md) | [Install & Verify](docs/INSTALL_FROM_GITHUB.md) |
+[Downloads](https://github.com/RyanHamze/SHAI/releases) | [Security](SECURITY.md)
 
 SHAI is an installer add-on for a computer that already runs Ubuntu Desktop.
 It helps repurpose that computer as a local smart-home and AI hub: choose your

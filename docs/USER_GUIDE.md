@@ -1,5 +1,17 @@
 # SHAI User Manual
 
+[Home](../README.md) | [Install & Verify](INSTALL_FROM_GITHUB.md) |
+[Downloads](https://github.com/RyanHamze/SHAI/releases)
+
+## Contents
+
+- [Setup](#shai-setup)
+- [SHDef](#shdef-local-network-protection)
+- [SHAPP](#shapp-apps-and-updates)
+- [SHEALTH](#shealth-local-monitoring)
+- [AIA](#aia-local-ai-center)
+- [Metadata, Connectivity And Removal](#metadata-connectivity-and-removal)
+
 For SHAI 0.17.0 test prerelease on Ubuntu Desktop 26.04.x LTS, 64-bit amd64.
 SHAI adds local smart-home and AI tools; Ubuntu remains your operating system.
 This is test software. Back up before applying Setup or changing applications.

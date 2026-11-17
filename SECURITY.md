@@ -3,6 +3,11 @@
 Report vulnerabilities privately to **shai@aabeyllc.com**. Do not post
 credentials, private keys, personal configuration or unredacted logs in public.
 
+You can also [report a vulnerability privately on GitHub](https://github.com/RyanHamze/SHAI/security/advisories/new).
+For ordinary bugs or suggestions, use Issues or Discussions with redacted details.
+If a credential was exposed, revoke or rotate it immediately; deleting a file
+or rewriting Git history does not make a previously exposed secret safe again.
+
 Download SHAI from this repository's releases and use the verified installer
 entry point. It checks a pinned SHA-256, a signed GitHub release-validation
 attestation and package identity before installation. The attestation describes

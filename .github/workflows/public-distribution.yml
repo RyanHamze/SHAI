@@ -26,6 +26,7 @@ jobs:
           allowed = {
               '.gitignore', '.github/workflows/public-distribution.yml',
               'README.md', 'SECURITY.md', 'install.sh',
+              'assets/shai-logo.svg',
               'docs/INSTALL_FROM_GITHUB.md', 'docs/USER_GUIDE.md',
               'docs/THIRD_PARTY_NOTICES.md',
               'licenses/LGPL-2.1.txt', 'licenses/shai-gnome-shell.css',
